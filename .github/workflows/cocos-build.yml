@@ -36,8 +36,9 @@ jobs:
       BUILD_PLATFORM: ${{ inputs.platform || 'web-mobile' }}
       BUILD_DEBUG: ${{ inputs.debug || false }}
       BUILD_DIR: ${{ github.workspace }}/build
+      COCOS_LOG_DIR: ${{ github.workspace }}/build-logs
       COCOS_CREATOR_PATH: ${{ vars.COCOS_CREATOR_PATH }}
-      COCOS_CREATOR_DMG_URL: ${{ secrets.COCOS_CREATOR_DMG_URL }}
+      COCOS_CREATOR_DMG_URL: ${{ secrets.COCOS_CREATOR_DMG_URL || vars.COCOS_CREATOR_DMG_URL }}
 
     steps:
       - name: Checkout
@@ -51,6 +52,23 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Check Cocos Creator CI settings
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "${COCOS_CREATOR_PATH}" ]; then
+            echo "COCOS_CREATOR_PATH is set."
+          else
+            echo "COCOS_CREATOR_PATH is not set."
+          fi
+
+          if [ -n "${COCOS_CREATOR_DMG_URL}" ]; then
+            echo "COCOS_CREATOR_DMG_URL is set."
+          else
+            echo "COCOS_CREATOR_DMG_URL is not set."
+          fi
 
       - name: Install Cocos Creator from DMG
         if: env.COCOS_CREATOR_DMG_URL != ''
@@ -75,7 +93,10 @@ jobs:
             exit 1
           fi
 
-          sudo ditto "${app_path}" "/Applications/$(basename "${app_path}")"
+          install_dir="/Applications/CocosCreator/Creator/${CREATOR_VERSION}"
+          sudo mkdir -p "${install_dir}"
+          sudo ditto "${app_path}" "${install_dir}/CocosCreator.app"
+          sudo xattr -dr com.apple.quarantine "${install_dir}/CocosCreator.app" || true
 
       - name: Resolve Cocos Creator executable
         shell: bash
@@ -104,8 +125,9 @@ jobs:
 
           {
             echo "Cocos Creator ${CREATOR_VERSION} executable was not found."
-            echo "For GitHub-hosted runners, set repository secret COCOS_CREATOR_DMG_URL to a downloadable Cocos Creator macOS DMG."
+            echo "For GitHub-hosted runners, set repository secret or variable COCOS_CREATOR_DMG_URL to a downloadable Cocos Creator macOS DMG."
             echo "For self-hosted runners, install Cocos Creator and set repository variable COCOS_CREATOR_PATH."
+            echo "If this is a pull_request from a fork, GitHub does not pass repository secrets to the workflow."
           } >&2
           exit 1
 
@@ -115,8 +137,9 @@ jobs:
           set -euo pipefail
 
           rm -rf "${BUILD_DIR}/${BUILD_PLATFORM}"
+          mkdir -p "${COCOS_LOG_DIR}"
 
-          build_args="platform=${BUILD_PLATFORM};debug=${BUILD_DEBUG};buildPath=${BUILD_DIR}"
+          build_args="platform=${BUILD_PLATFORM};debug=${BUILD_DEBUG};buildPath=${BUILD_DIR};logDest=${COCOS_LOG_DIR}/cocos-build.log"
           echo "Build args: ${build_args}"
 
           set +e
@@ -134,6 +157,15 @@ jobs:
           fi
 
           test -d "${BUILD_DIR}/${BUILD_PLATFORM}"
+
+      - name: Upload Cocos build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cocos-build-logs-${{ github.sha }}
+          path: build-logs
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
