@@ -24,6 +24,12 @@ on:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -37,6 +43,7 @@ jobs:
       BUILD_DEBUG: ${{ inputs.debug || false }}
       BUILD_DIR: ${{ github.workspace }}/build
       COCOS_LOG_DIR: ${{ github.workspace }}/build-logs
+      PAGES_DIR: ${{ github.workspace }}/github-pages
       COCOS_CREATOR_PATH: ${{ vars.COCOS_CREATOR_PATH }}
       COCOS_USE_XVFB: ${{ vars.COCOS_USE_XVFB || 'true' }}
 
@@ -159,3 +166,39 @@ jobs:
           path: build/${{ env.BUILD_PLATFORM }}
           if-no-files-found: error
           retention-days: 14
+
+      - name: Prepare GitHub Pages content
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf "${PAGES_DIR}"
+          mkdir -p "${PAGES_DIR}"
+          cp -a "${BUILD_DIR}/${BUILD_PLATFORM}/." "${PAGES_DIR}/"
+          touch "${PAGES_DIR}/.nojekyll"
+
+          if [ ! -f "${PAGES_DIR}/index.html" ]; then
+            echo "GitHub Pages content must contain index.html at the root." >&2
+            exit 1
+          fi
+
+      - name: Upload GitHub Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ env.PAGES_DIR }}
+
+  deploy-pages:
+    name: Deploy GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
