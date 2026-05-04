@@ -38,6 +38,7 @@ jobs:
       BUILD_DIR: ${{ github.workspace }}/build
       COCOS_LOG_DIR: ${{ github.workspace }}/build-logs
       COCOS_CREATOR_PATH: ${{ vars.COCOS_CREATOR_PATH }}
+      COCOS_USE_XVFB: ${{ vars.COCOS_USE_XVFB || 'true' }}
 
     steps:
       - name: Checkout
@@ -53,74 +54,94 @@ jobs:
         run: npm ci
 
       - name: Resolve Cocos Creator executable
-        shell: pwsh
+        shell: bash
         run: |
-          $candidates = @(
-            $env:COCOS_CREATOR_PATH,
-            "$env:COCOS_CREATOR_PATH/Contents/MacOS/CocosCreator",
-            "$env:COCOS_CREATOR_PATH/CocosCreator.exe",
-            "C:/Program Files/CocosCreator/Creator/$env:CREATOR_VERSION/CocosCreator.exe",
-            "C:/Program Files/Cocos/Creator/$env:CREATOR_VERSION/CocosCreator.exe",
-            "/Applications/CocosCreator/Creator/$env:CREATOR_VERSION/CocosCreator.app/Contents/MacOS/CocosCreator",
-            "/Applications/Cocos/Creator/$env:CREATOR_VERSION/CocosCreator.app/Contents/MacOS/CocosCreator"
+          set -euo pipefail
+
+          candidates=(
+            "${COCOS_CREATOR_PATH}"
+            "${COCOS_CREATOR_PATH}/CocosCreator"
+            "${HOME}/CocosCreator/Creator/${CREATOR_VERSION}/CocosCreator"
+            "${HOME}/Cocos/Creator/${CREATOR_VERSION}/CocosCreator"
+            "/opt/CocosCreator/Creator/${CREATOR_VERSION}/CocosCreator"
+            "/opt/Cocos/Creator/${CREATOR_VERSION}/CocosCreator"
+            "/usr/local/bin/CocosCreator"
+            "/usr/bin/CocosCreator"
           )
 
-          foreach ($candidate in $candidates) {
-            if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-              "COCOS_EXECUTABLE=$candidate" | Out-File -FilePath $env:GITHUB_ENV -Append
-              "Using Cocos Creator: $candidate"
-              exit 0
-            }
-          }
+          if command -v CocosCreator >/dev/null 2>&1; then
+            candidates+=("$(command -v CocosCreator)")
+          fi
 
-          Write-Error @"
-          Cocos Creator $env:CREATOR_VERSION executable was not found.
-          Install Cocos Creator on the build runner and set repository variable COCOS_CREATOR_PATH.
-          Examples:
-          Windows: C:\Program Files\CocosCreator\Creator\3.6.3\CocosCreator.exe
-          macOS: /Applications/CocosCreator/Creator/3.6.3/CocosCreator.app/Contents/MacOS/CocosCreator
-          "@
+          for candidate in "${candidates[@]}"; do
+            if [ -n "${candidate}" ] && [ -f "${candidate}" ] && [ -x "${candidate}" ]; then
+              echo "COCOS_EXECUTABLE=${candidate}" >> "${GITHUB_ENV}"
+              echo "Using Cocos Creator: ${candidate}"
+              exit 0
+            fi
+          done
+
+          {
+            echo "Cocos Creator ${CREATOR_VERSION} executable was not found."
+            echo "Install Cocos Creator on the Linux build runner and set repository variable COCOS_CREATOR_PATH."
+            echo "Example: /opt/CocosCreator/Creator/3.6.3/CocosCreator"
+          } >&2
           exit 1
 
       - name: Build project
-        shell: pwsh
+        shell: bash
         run: |
-          Remove-Item -Recurse -Force "$env:BUILD_DIR/$env:BUILD_PLATFORM" -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path $env:COCOS_LOG_DIR | Out-Null
+          set -euo pipefail
 
-          $sourceConfig = "buildConfig_$env:BUILD_PLATFORM.json"
-          $ciConfig = "buildConfig_ci.json"
-          if (-not (Test-Path -LiteralPath $sourceConfig -PathType Leaf)) {
-            Write-Error "Build config was not found: $sourceConfig"
+          rm -rf "${BUILD_DIR}/${BUILD_PLATFORM}"
+          mkdir -p "${COCOS_LOG_DIR}"
+
+          source_config="buildConfig_${BUILD_PLATFORM}.json"
+          ci_config="buildConfig_ci.json"
+          if [ ! -f "${source_config}" ]; then
+            echo "Build config was not found: ${source_config}" >&2
             exit 1
-          }
+          fi
 
-          $logPath = Join-Path $env:COCOS_LOG_DIR "cocos-build.log"
-          $config = Get-Content -Raw -LiteralPath $sourceConfig | ConvertFrom-Json
-          $config.debug = [System.Convert]::ToBoolean($env:BUILD_DEBUG)
-          $config.buildPath = $env:BUILD_DIR
-          $config.logDest = $logPath
-          $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $ciConfig -Encoding UTF8
+          node - "${source_config}" "${ci_config}" "${BUILD_DEBUG}" "${BUILD_DIR}" "${COCOS_LOG_DIR}/cocos-build.log" <<'NODE'
+          const fs = require('fs');
 
-          $buildArgs = "configPath=$ciConfig;"
-          "Build args: $buildArgs"
+          const [sourceConfig, ciConfig, debug, buildPath, logDest] = process.argv.slice(2);
+          const config = JSON.parse(fs.readFileSync(sourceConfig, 'utf8'));
 
-          & $env:COCOS_EXECUTABLE --project $env:GITHUB_WORKSPACE --build $buildArgs
-          $status = $LASTEXITCODE
+          config.debug = debug === 'true';
+          config.buildPath = buildPath;
+          config.logDest = logDest;
 
-          if ($status -ne 0 -and $status -ne 36) {
-            Write-Error "Cocos Creator build failed with exit code $status"
-            exit $status
-          }
+          fs.writeFileSync(ciConfig, `${JSON.stringify(config, null, 2)}\n`);
+          NODE
 
-          if ($status -eq 36) {
-            "Cocos Creator reported successful build with exit code 36."
-          }
+          build_args="configPath=${ci_config};"
+          echo "Build args: ${build_args}"
 
-          if (-not (Test-Path -LiteralPath "$env:BUILD_DIR/$env:BUILD_PLATFORM" -PathType Container)) {
-            Write-Error "Build output directory was not found: $env:BUILD_DIR/$env:BUILD_PLATFORM"
+          command=("${COCOS_EXECUTABLE}" --project "${GITHUB_WORKSPACE}" --build "${build_args}")
+          if [ "${COCOS_USE_XVFB}" = "true" ] && command -v xvfb-run >/dev/null 2>&1; then
+            command=(xvfb-run -a "${command[@]}")
+          fi
+
+          set +e
+          "${command[@]}"
+          status=$?
+          set -e
+
+          if [ "${status}" -ne 0 ] && [ "${status}" -ne 36 ]; then
+            echo "Cocos Creator build failed with exit code ${status}" >&2
+            exit "${status}"
+          fi
+
+          if [ "${status}" -eq 36 ]; then
+            echo "Cocos Creator reported successful build with exit code 36."
+          fi
+
+          if [ ! -d "${BUILD_DIR}/${BUILD_PLATFORM}" ]; then
+            echo "Build output directory was not found: ${BUILD_DIR}/${BUILD_PLATFORM}" >&2
             exit 1
-          }
+          fi
 
       - name: Upload Cocos build logs
         if: always()
