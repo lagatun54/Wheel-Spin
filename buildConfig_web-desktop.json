@@ -1,0 +1,6 @@
+{
+  "platform": "web-desktop",
+  "debug": false,
+  "buildPath": "project://build",
+  "outputName": "web-desktop"
+}

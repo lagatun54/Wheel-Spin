@@ -1,0 +1,6 @@
+{
+  "platform": "web-mobile",
+  "debug": false,
+  "buildPath": "project://build",
+  "outputName": "web-mobile"
+}

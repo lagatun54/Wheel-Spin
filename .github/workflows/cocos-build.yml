@@ -28,7 +28,7 @@ permissions:
 jobs:
   build:
     name: Build ${{ inputs.platform || 'web-mobile' }}
-    runs-on: ${{ vars.COCOS_RUNNER || 'macos-latest' }}
+    runs-on: ${{ vars.COCOS_RUNNER || 'self-hosted' }}
     timeout-minutes: 45
 
     env:
@@ -38,7 +38,6 @@ jobs:
       BUILD_DIR: ${{ github.workspace }}/build
       COCOS_LOG_DIR: ${{ github.workspace }}/build-logs
       COCOS_CREATOR_PATH: ${{ vars.COCOS_CREATOR_PATH }}
-      COCOS_CREATOR_DMG_URL: ${{ secrets.COCOS_CREATOR_DMG_URL || vars.COCOS_CREATOR_DMG_URL }}
 
     steps:
       - name: Checkout
@@ -53,110 +52,75 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Check Cocos Creator CI settings
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ -n "${COCOS_CREATOR_PATH}" ]; then
-            echo "COCOS_CREATOR_PATH is set."
-          else
-            echo "COCOS_CREATOR_PATH is not set."
-          fi
-
-          if [ -n "${COCOS_CREATOR_DMG_URL}" ]; then
-            echo "COCOS_CREATOR_DMG_URL is set."
-          else
-            echo "COCOS_CREATOR_DMG_URL is not set."
-          fi
-
-      - name: Install Cocos Creator from DMG
-        if: env.COCOS_CREATOR_DMG_URL != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          dmg_path="${RUNNER_TEMP}/cocos-creator.dmg"
-          mount_dir="$(mktemp -d)"
-
-          curl --fail --location --retry 3 "${COCOS_CREATOR_DMG_URL}" --output "${dmg_path}"
-          hdiutil attach "${dmg_path}" -mountpoint "${mount_dir}" -nobrowse -quiet
-
-          cleanup() {
-            hdiutil detach "${mount_dir}" -quiet || true
-          }
-          trap cleanup EXIT
-
-          app_path="$(find "${mount_dir}" -maxdepth 2 -name '*.app' -print -quit)"
-          if [ -z "${app_path}" ]; then
-            echo "No .app bundle found in Cocos Creator DMG." >&2
-            exit 1
-          fi
-
-          install_dir="/Applications/CocosCreator/Creator/${CREATOR_VERSION}"
-          sudo mkdir -p "${install_dir}"
-          sudo ditto "${app_path}" "${install_dir}/CocosCreator.app"
-          sudo xattr -dr com.apple.quarantine "${install_dir}/CocosCreator.app" || true
-
       - name: Resolve Cocos Creator executable
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-
-          candidates=(
-            "${COCOS_CREATOR_PATH}"
-            "${COCOS_CREATOR_PATH}/Contents/MacOS/CocosCreator"
-            "/Applications/CocosCreator/Creator/${CREATOR_VERSION}/CocosCreator.app/Contents/MacOS/CocosCreator"
-            "/Applications/Cocos/Creator/${CREATOR_VERSION}/CocosCreator.app/Contents/MacOS/CocosCreator"
-            "/Applications/CocosCreator.app/Contents/MacOS/CocosCreator"
+          $candidates = @(
+            $env:COCOS_CREATOR_PATH,
+            "$env:COCOS_CREATOR_PATH/Contents/MacOS/CocosCreator",
+            "$env:COCOS_CREATOR_PATH/CocosCreator.exe",
+            "C:/Program Files/CocosCreator/Creator/$env:CREATOR_VERSION/CocosCreator.exe",
+            "C:/Program Files/Cocos/Creator/$env:CREATOR_VERSION/CocosCreator.exe",
+            "/Applications/CocosCreator/Creator/$env:CREATOR_VERSION/CocosCreator.app/Contents/MacOS/CocosCreator",
+            "/Applications/Cocos/Creator/$env:CREATOR_VERSION/CocosCreator.app/Contents/MacOS/CocosCreator"
           )
 
-          while IFS= read -r candidate; do
-            candidates+=("${candidate}")
-          done < <(find /Applications -path '*/Contents/MacOS/CocosCreator' -type f -print 2>/dev/null)
-
-          for candidate in "${candidates[@]}"; do
-            if [ -n "${candidate}" ] && [ -x "${candidate}" ]; then
-              echo "COCOS_EXECUTABLE=${candidate}" >> "${GITHUB_ENV}"
-              echo "Using Cocos Creator: ${candidate}"
+          foreach ($candidate in $candidates) {
+            if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+              "COCOS_EXECUTABLE=$candidate" | Out-File -FilePath $env:GITHUB_ENV -Append
+              "Using Cocos Creator: $candidate"
               exit 0
-            fi
-          done
+            }
+          }
 
-          {
-            echo "Cocos Creator ${CREATOR_VERSION} executable was not found."
-            echo "For GitHub-hosted runners, set repository secret or variable COCOS_CREATOR_DMG_URL to a downloadable Cocos Creator macOS DMG."
-            echo "For self-hosted runners, install Cocos Creator and set repository variable COCOS_CREATOR_PATH."
-            echo "If this is a pull_request from a fork, GitHub does not pass repository secrets to the workflow."
-          } >&2
+          Write-Error @"
+          Cocos Creator $env:CREATOR_VERSION executable was not found.
+          Install Cocos Creator on the build runner and set repository variable COCOS_CREATOR_PATH.
+          Examples:
+          Windows: C:\Program Files\CocosCreator\Creator\3.6.3\CocosCreator.exe
+          macOS: /Applications/CocosCreator/Creator/3.6.3/CocosCreator.app/Contents/MacOS/CocosCreator
+          "@
           exit 1
 
       - name: Build project
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
+          Remove-Item -Recurse -Force "$env:BUILD_DIR/$env:BUILD_PLATFORM" -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $env:COCOS_LOG_DIR | Out-Null
 
-          rm -rf "${BUILD_DIR}/${BUILD_PLATFORM}"
-          mkdir -p "${COCOS_LOG_DIR}"
+          $sourceConfig = "buildConfig_$env:BUILD_PLATFORM.json"
+          $ciConfig = "buildConfig_ci.json"
+          if (-not (Test-Path -LiteralPath $sourceConfig -PathType Leaf)) {
+            Write-Error "Build config was not found: $sourceConfig"
+            exit 1
+          }
 
-          build_args="platform=${BUILD_PLATFORM};debug=${BUILD_DEBUG};buildPath=${BUILD_DIR};logDest=${COCOS_LOG_DIR}/cocos-build.log"
-          echo "Build args: ${build_args}"
+          $logPath = Join-Path $env:COCOS_LOG_DIR "cocos-build.log"
+          $config = Get-Content -Raw -LiteralPath $sourceConfig | ConvertFrom-Json
+          $config.debug = [System.Convert]::ToBoolean($env:BUILD_DEBUG)
+          $config.buildPath = $env:BUILD_DIR
+          $config.logDest = $logPath
+          $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $ciConfig -Encoding UTF8
 
-          set +e
-          "${COCOS_EXECUTABLE}" --project "${GITHUB_WORKSPACE}" --build "${build_args}"
-          status=$?
-          set -e
+          $buildArgs = "configPath=$ciConfig;"
+          "Build args: $buildArgs"
 
-          if [ "${status}" -ne 0 ] && [ "${status}" -ne 36 ]; then
-            echo "Cocos Creator build failed with exit code ${status}" >&2
-            exit "${status}"
-          fi
+          & $env:COCOS_EXECUTABLE --project $env:GITHUB_WORKSPACE --build $buildArgs
+          $status = $LASTEXITCODE
 
-          if [ "${status}" -eq 36 ]; then
-            echo "Cocos Creator reported successful build with exit code 36."
-          fi
+          if ($status -ne 0 -and $status -ne 36) {
+            Write-Error "Cocos Creator build failed with exit code $status"
+            exit $status
+          }
 
-          test -d "${BUILD_DIR}/${BUILD_PLATFORM}"
+          if ($status -eq 36) {
+            "Cocos Creator reported successful build with exit code 36."
+          }
+
+          if (-not (Test-Path -LiteralPath "$env:BUILD_DIR/$env:BUILD_PLATFORM" -PathType Container)) {
+            Write-Error "Build output directory was not found: $env:BUILD_DIR/$env:BUILD_PLATFORM"
+            exit 1
+          }
 
       - name: Upload Cocos build logs
         if: always()
