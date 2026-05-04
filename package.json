@@ -1,0 +1,11 @@
+{
+  "name": "TestProject",
+  "uuid": "fabc300e-7c51-40e9-b6cd-2e5fc23c723b",
+  "version": "3.6.3",
+  "creator": {
+    "version": "3.6.3"
+  },
+  "dependencies": {
+    "inversify": "^8.1.0"
+  }
+}

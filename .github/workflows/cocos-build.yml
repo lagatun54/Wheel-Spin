@@ -1,0 +1,114 @@
+name: Cocos Creator Build
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Cocos build platform
+        required: true
+        type: choice
+        default: web-mobile
+        options:
+          - web-mobile
+          - web-desktop
+      debug:
+        description: Build debug version
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ inputs.platform || 'web-mobile' }}
+    runs-on: ${{ vars.COCOS_RUNNER || 'macos-latest' }}
+    timeout-minutes: 30
+
+    env:
+      CREATOR_VERSION: 3.6.3
+      BUILD_PLATFORM: ${{ inputs.platform || 'web-mobile' }}
+      BUILD_DEBUG: ${{ inputs.debug || false }}
+      BUILD_DIR: ${{ github.workspace }}/build
+      COCOS_CREATOR_PATH: ${{ vars.COCOS_CREATOR_PATH }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve Cocos Creator executable
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          candidates=(
+            "${COCOS_CREATOR_PATH}"
+            "${COCOS_CREATOR_PATH}/Contents/MacOS/CocosCreator"
+            "/Applications/CocosCreator/Creator/${CREATOR_VERSION}/CocosCreator.app/Contents/MacOS/CocosCreator"
+            "/Applications/Cocos/Creator/${CREATOR_VERSION}/CocosCreator.app/Contents/MacOS/CocosCreator"
+            "/Applications/CocosCreator.app/Contents/MacOS/CocosCreator"
+          )
+
+          for candidate in "${candidates[@]}"; do
+            if [ -n "${candidate}" ] && [ -x "${candidate}" ]; then
+              echo "COCOS_EXECUTABLE=${candidate}" >> "${GITHUB_ENV}"
+              echo "Using Cocos Creator: ${candidate}"
+              exit 0
+            fi
+          done
+
+          {
+            echo "Cocos Creator ${CREATOR_VERSION} executable was not found."
+            echo "Install Cocos Creator on the runner or set repository variable COCOS_CREATOR_PATH."
+            echo "For GitHub-hosted runners, use a prepared runner image or a self-hosted macOS runner with Cocos installed."
+          } >&2
+          exit 1
+
+      - name: Build project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf "${BUILD_DIR}/${BUILD_PLATFORM}"
+
+          build_args="platform=${BUILD_PLATFORM};debug=${BUILD_DEBUG};buildPath=${BUILD_DIR}"
+          echo "Build args: ${build_args}"
+
+          set +e
+          "${COCOS_EXECUTABLE}" --project "${GITHUB_WORKSPACE}" --build "${build_args}"
+          status=$?
+          set -e
+
+          if [ "${status}" -ne 0 ] && [ "${status}" -ne 36 ]; then
+            echo "Cocos Creator build failed with exit code ${status}" >&2
+            exit "${status}"
+          fi
+
+          if [ "${status}" -eq 36 ]; then
+            echo "Cocos Creator reported successful build with exit code 36."
+          fi
+
+          test -d "${BUILD_DIR}/${BUILD_PLATFORM}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cocos-${{ env.BUILD_PLATFORM }}-${{ github.sha }}
+          path: build/${{ env.BUILD_PLATFORM }}
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,20 @@
+{
+  "general": {
+    "designResolution": {
+      "fitHeight": true,
+      "width": 1280,
+      "height": 720,
+      "fitWidth": false
+    }
+  },
+  "layer": [
+    {
+      "name": "UI-Button",
+      "value": 524288
+    },
+    {
+      "name": "PopUp",
+      "value": 262144
+    }
+  ]
+}
