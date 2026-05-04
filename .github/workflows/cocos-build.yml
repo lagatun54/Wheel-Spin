@@ -29,7 +29,7 @@ jobs:
   build:
     name: Build ${{ inputs.platform || 'web-mobile' }}
     runs-on: ${{ vars.COCOS_RUNNER || 'macos-latest' }}
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     env:
       CREATOR_VERSION: 3.6.3
@@ -37,6 +37,7 @@ jobs:
       BUILD_DEBUG: ${{ inputs.debug || false }}
       BUILD_DIR: ${{ github.workspace }}/build
       COCOS_CREATOR_PATH: ${{ vars.COCOS_CREATOR_PATH }}
+      COCOS_CREATOR_DMG_URL: ${{ secrets.COCOS_CREATOR_DMG_URL }}
 
     steps:
       - name: Checkout
@@ -51,6 +52,31 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Cocos Creator from DMG
+        if: env.COCOS_CREATOR_DMG_URL != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          dmg_path="${RUNNER_TEMP}/cocos-creator.dmg"
+          mount_dir="$(mktemp -d)"
+
+          curl --fail --location --retry 3 "${COCOS_CREATOR_DMG_URL}" --output "${dmg_path}"
+          hdiutil attach "${dmg_path}" -mountpoint "${mount_dir}" -nobrowse -quiet
+
+          cleanup() {
+            hdiutil detach "${mount_dir}" -quiet || true
+          }
+          trap cleanup EXIT
+
+          app_path="$(find "${mount_dir}" -maxdepth 2 -name '*.app' -print -quit)"
+          if [ -z "${app_path}" ]; then
+            echo "No .app bundle found in Cocos Creator DMG." >&2
+            exit 1
+          fi
+
+          sudo ditto "${app_path}" "/Applications/$(basename "${app_path}")"
+
       - name: Resolve Cocos Creator executable
         shell: bash
         run: |
@@ -64,6 +90,10 @@ jobs:
             "/Applications/CocosCreator.app/Contents/MacOS/CocosCreator"
           )
 
+          while IFS= read -r candidate; do
+            candidates+=("${candidate}")
+          done < <(find /Applications -path '*/Contents/MacOS/CocosCreator' -type f -print 2>/dev/null)
+
           for candidate in "${candidates[@]}"; do
             if [ -n "${candidate}" ] && [ -x "${candidate}" ]; then
               echo "COCOS_EXECUTABLE=${candidate}" >> "${GITHUB_ENV}"
@@ -74,8 +104,8 @@ jobs:
 
           {
             echo "Cocos Creator ${CREATOR_VERSION} executable was not found."
-            echo "Install Cocos Creator on the runner or set repository variable COCOS_CREATOR_PATH."
-            echo "For GitHub-hosted runners, use a prepared runner image or a self-hosted macOS runner with Cocos installed."
+            echo "For GitHub-hosted runners, set repository secret COCOS_CREATOR_DMG_URL to a downloadable Cocos Creator macOS DMG."
+            echo "For self-hosted runners, install Cocos Creator and set repository variable COCOS_CREATOR_PATH."
           } >&2
           exit 1
 
