@@ -63,12 +63,17 @@ export class WebFontLabel extends Component {
 
         void wf
             .injectStylesheetInHeadAsync(cssUrl)
-            .then(() => (document.fonts ? document.fonts.ready : Promise.resolve()))
+            .then(() => {
+                if (!document.fonts) {
+                    return;
+                }
+
+                return document.fonts.ready.then(() => undefined);
+            })
             .then(() => {
                 if (document.fonts && document.fonts.load) {
-                    return document.fonts.load(`${size}px "${family}"`);
+                    return document.fonts.load(`${size}px "${family}"`).then(() => undefined);
                 }
-                return Promise.resolve();
             })
             .then(() => {
                 applyFontToLabel();

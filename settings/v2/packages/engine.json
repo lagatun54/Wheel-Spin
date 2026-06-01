@@ -80,7 +80,7 @@
         "_value": false
       },
       "particle-2d": {
-        "_value": true
+        "_value": false
       },
       "audio": {
         "_value": true
@@ -101,10 +101,10 @@
         "_value": true
       },
       "spine": {
-        "_value": true
+        "_value": false
       },
       "dragon-bones": {
-        "_value": true
+        "_value": false
       },
       "marionette": {
         "_value": false
@@ -118,13 +118,10 @@
       "animation",
       "audio",
       "base",
-      "dragon-bones",
       "gfx-webgl",
       "gfx-webgl2",
       "intersection-2d",
-      "particle-2d",
       "profiler",
-      "spine",
       "tiled-map",
       "tween",
       "ui",

@@ -1,12 +1,12 @@
 import { getPopUpLoseViewOrNull, getPopUpWinViewOrNull } from '../di/popupBindings';
 import { type RouletteColor } from '../RedBlackRandom';
-import type { RouletteGameModel } from '../model/RouletteGameModel';
 import { RouletteBetView } from '../view/RouletteBetView';
+import type { RouletteGameController } from './RouletteGameController';
 
 export class RouletteBetController {
     constructor(
         private readonly view: RouletteBetView,
-        private readonly model: RouletteGameModel,
+        private readonly game: RouletteGameController,
     ) {}
 
     static showWinPopUp(payout: number, onPopUpDismissed?: () => void): void {
@@ -39,8 +39,6 @@ export class RouletteBetController {
     }
 
     private applyBetColor(color: RouletteColor): void {
-        const m = this.model;
-        m.setBetColor(color);
-        this.view.applyBetColorHighlight(m.betColor);
+        this.game.dispatch({ type: 'bet/color_set', color });
     }
 }

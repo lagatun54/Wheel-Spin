@@ -53,13 +53,13 @@ export class RouletteGame extends Component {
         const game = this._controller;
         const balance = this.balanceView;
         if (game && balance?.isValid) {
-            this._balanceController = new PlayerBalanceController(balance, game.model);
+            this._balanceController = new PlayerBalanceController(balance, game);
             this._balanceController.start();
         }
 
         const betView = this.betView;
         if (game && balance?.isValid && betView?.isValid) {
-            this._betController = new RouletteBetController(betView, game.model);
+            this._betController = new RouletteBetController(betView, game);
             this._betController.start();
         }
 

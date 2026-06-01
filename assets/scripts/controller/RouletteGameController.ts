@@ -1,5 +1,12 @@
 import { pickRandomRouletteSlot5050, type RouletteColor } from '../RedBlackRandom';
-import { RouletteGameModel, type SpinFinalizeOutcome } from '../model/RouletteGameModel';
+import {
+    createRouletteGameState,
+    reduceRouletteGame,
+    type RouletteGameAction,
+    type RouletteGameCommand,
+    type RouletteGameState,
+    type SpinFinalizeOutcome,
+} from '../model/RouletteGameModel';
 import { PlayerBalanceView } from '../view/PlayerBalanceView';
 import { RouletteBetView } from '../view/RouletteBetView';
 import { RouletteBetController } from './RouletteBetController';
@@ -11,7 +18,7 @@ export type RouletteGameControllerOptions = {
 };
 
 export class RouletteGameController {
-    private readonly _model = new RouletteGameModel();
+    private _state: RouletteGameState;
     private readonly _balanceView: PlayerBalanceView;
     private readonly _betView: RouletteBetView;
     private _spinInputLocked = false;
@@ -21,11 +28,17 @@ export class RouletteGameController {
     constructor(options: RouletteGameControllerOptions) {
         this._balanceView = options.balanceView;
         this._betView = options.betView;
-        this._model.setStartingBalance(options.startingBalance);
+        this._state = createRouletteGameState(options.startingBalance);
     }
 
-    get model(): RouletteGameModel {
-        return this._model;
+    get state(): RouletteGameState {
+        return this._state;
+    }
+
+    dispatch(action: RouletteGameAction): void {
+        const reduced = reduceRouletteGame(this._state, action);
+        this._state = reduced.state;
+        this.executeCommands(reduced.commands);
     }
 
     start(): void {
@@ -39,7 +52,7 @@ export class RouletteGameController {
     refreshBalanceView(): void {
         const view = this.balanceView;
         if (view) {
-            view.setBalanceAndBet(this._model.balance, this._model.bet);
+            view.setBalanceAndBet(this._state.balance, this._state.bet);
         }
     }
 
@@ -48,18 +61,59 @@ export class RouletteGameController {
         if (!betView?.isValid) {
             return;
         }
-        betView.applyBetColorHighlight(this._model.betColor);
+        betView.applyBetColorHighlight(this._state.betColor);
+    }
+
+    private executeCommands(commands: RouletteGameCommand[]): void {
+        for (const command of commands) {
+            switch (command.type) {
+                case 'none':
+                    break;
+                case 'refresh_balance':
+                    this.refreshBalanceView();
+                    break;
+                case 'sync_bet_color':
+                    this.syncBetColorSelectionView();
+                    break;
+                case 'show_lose_popup':
+                    this._spinInputLocked = true;
+                    RouletteBetController.showLosePopUp(command.stake, () => this.notifySpinUiUnlocked());
+                    break;
+                case 'show_win_popup':
+                    this._spinInputLocked = true;
+                    RouletteBetController.showWinPopUp(command.payout, () => this.notifySpinUiUnlocked());
+                    break;
+                case 'animate_balance': {
+                    const view = this.balanceView;
+                    if (view) {
+                        view.animateBalance(command.fromBalance, command.toBalance, () => {
+                            this.dispatch({
+                                type: 'balance/commit_win',
+                                toBalance: command.toBalance,
+                            });
+                        });
+                    } else {
+                        this.dispatch({
+                            type: 'balance/commit_win',
+                            toBalance: command.toBalance,
+                        });
+                    }
+                    break;
+                }
+            }
+        }
     }
 
     beginSpinRound(): boolean {
         if (this._spinInputLocked) {
             return false;
         }
-        const result = this._model.beginSpinRound();
-        if (result.ok === false) {
+        const reduced = reduceRouletteGame(this._state, { type: 'spin/begin' });
+        if (reduced.effect.type !== 'begin_spin' || reduced.effect.result.ok === false) {
             return false;
         }
-        this.refreshBalanceView();
+        this._state = reduced.state;
+        this.executeCommands(reduced.commands);
         return true;
     }
 
@@ -91,42 +145,11 @@ export class RouletteGameController {
     }
 
     finalizeSpin(resultColor: RouletteColor): SpinFinalizeOutcome {
-        const outcome = this._model.finalizeSpin(resultColor);
-        this.syncBetColorSelectionView();
-
-        if (outcome.kind === 'idle') {
-            return outcome;
-        }
-
-        if (outcome.kind === 'refund_no_color') {
-            this.refreshBalanceView();
-            return outcome;
-        }
-
-        if (outcome.kind === 'lose') {
-            this.refreshBalanceView();
-            this._spinInputLocked = true;
-            RouletteBetController.showLosePopUp(outcome.stake, () => this.notifySpinUiUnlocked());
-            return outcome;
-        }
-
-        const { fromBalance, toBalance } = outcome;
-        this.refreshBalanceView();
-
-        this._spinInputLocked = true;
-        RouletteBetController.showWinPopUp(toBalance - fromBalance, () => this.notifySpinUiUnlocked());
-
-        const view = this.balanceView;
-        if (view) {
-            view.animateBalance(fromBalance, toBalance, () => {
-                this._model.commitBalanceAfterWin(toBalance);
-                view.setBalanceAndBet(this._model.balance, this._model.bet);
-            });
-        } else {
-            this._model.commitBalanceAfterWin(toBalance);
-            this.refreshBalanceView();
-        }
-
+        const reduced = reduceRouletteGame(this._state, { type: 'spin/finalize', resultColor });
+        this._state = reduced.state;
+        const outcome =
+            reduced.effect.type === 'finalize_spin' ? reduced.effect.outcome : { kind: 'idle' as const };
+        this.executeCommands(reduced.commands);
         return outcome;
     }
 }

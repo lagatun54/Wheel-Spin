@@ -1,10 +1,10 @@
-import type { RouletteGameModel } from '../model/RouletteGameModel';
 import { PlayerBalanceView } from '../view/PlayerBalanceView';
+import type { RouletteGameController } from './RouletteGameController';
 
 export class PlayerBalanceController {
     constructor(
         private readonly view: PlayerBalanceView,
-        private readonly model: RouletteGameModel,
+        private readonly game: RouletteGameController,
     ) {}
 
     start(): void {
@@ -13,8 +13,8 @@ export class PlayerBalanceController {
             onAdd50: () => this.addToBet(50),
             onResetBet: () => this.resetBet(),
         });
-        const m = this.model;
-        this.view.setBalanceAndBet(m.balance, m.bet);
+        const state = this.game.state;
+        this.view.setBalanceAndBet(state.balance, state.bet);
     }
 
     dispose(): void {
@@ -22,20 +22,16 @@ export class PlayerBalanceController {
     }
 
     private resetBet(): void {
-        const m = this.model;
-        m.resetBetAmount();
-        this.view.setBalanceAndBet(m.balance, m.bet);
+        this.game.dispatch({ type: 'bet/reset' });
     }
 
     private addToBet(delta: number): void {
-        const m = this.model;
         if (delta <= 0) {
             return;
         }
-        if (m.balance <= 0) {
+        if (this.game.state.balance <= 0) {
             return;
         }
-        m.addToBet(delta, true);
-        this.view.setBalanceAndBet(m.balance, m.bet);
+        this.game.dispatch({ type: 'bet/add', delta, maxByBalance: true });
     }
 }
