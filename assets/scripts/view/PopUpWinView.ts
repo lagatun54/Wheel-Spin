@@ -1,5 +1,4 @@
 import { _decorator, AudioClip, AudioSource, easing, Tween, tween } from 'cc';
-import type { PopUpWinController } from '../controller/PopUpWinController';
 import { PopUpView } from './PopUpView';
 
 const { ccclass, property } = _decorator;
@@ -15,7 +14,8 @@ export class PopUpWinView extends PopUpView {
     @property({ type: AudioClip, tooltip: 'Звук при открытии окна победы (не задан — без звука)' })
     openSound: AudioClip | null = null;
 
-    private _controller: PopUpWinController | null = null;
+    @property({ type: AudioSource, tooltip: 'AudioSource для звука открытия' })
+    audioSource: AudioSource | null = null;
 
     private readonly _winCountHolder = { value: 0 };
 
@@ -24,10 +24,6 @@ export class PopUpWinView extends PopUpView {
     };
 
     private _spinUnlockOnDismiss?: () => void;
-
-    setController(controller: PopUpWinController | null): void {
-        this._controller = controller;
-    }
 
     onDestroy() {
         this.stopWinCountAnimation();
@@ -43,11 +39,7 @@ export class PopUpWinView extends PopUpView {
         if (!this.openSound) {
             return;
         }
-        let source = this.node.getComponent(AudioSource);
-        if (!source) {
-            source = this.node.addComponent(AudioSource);
-        }
-        source.playOneShot(this.openSound);
+        this.audioSource?.playOneShot(this.openSound);
     }
 
     playScaleShowAnimation(duration: number, onComplete?: () => void): void {
@@ -97,16 +89,12 @@ export class PopUpWinView extends PopUpView {
 
     hide(): void {
         this.unschedule(this._autoClose);
-        if (this._controller) {
-            this._controller.hideWithAnimation();
-        } else {
-            this.playScaleHideAnimation(this.hideAnimDuration, () => {
-                this.hideImmediate();
-                const cb = this._spinUnlockOnDismiss;
-                this._spinUnlockOnDismiss = undefined;
-                cb?.();
-            });
-        }
+        this.playScaleHideAnimation(this.hideAnimDuration, () => {
+            this.hideImmediate();
+            const cb = this._spinUnlockOnDismiss;
+            this._spinUnlockOnDismiss = undefined;
+            cb?.();
+        });
     }
 
     hideImmediate(): void {
@@ -115,11 +103,7 @@ export class PopUpWinView extends PopUpView {
     }
 
     showWin(payout: number, onPopUpDismissed?: () => void): void {
-        if (this._controller) {
-            this._controller.showWin(payout, onPopUpDismissed);
-        } else {
-            this.renderWin(payout, onPopUpDismissed);
-        }
+        this.renderWin(payout, onPopUpDismissed);
     }
 
     renderWin(payout: number, onPopUpDismissed?: () => void): void {

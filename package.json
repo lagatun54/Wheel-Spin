@@ -6,6 +6,6 @@
     "version": "3.6.3"
   },
   "dependencies": {
-    "inversify": "^8.1.0"
+    "miniplex": "^2.0.0"
   }
 }

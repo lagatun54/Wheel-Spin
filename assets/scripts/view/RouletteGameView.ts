@@ -1,13 +1,16 @@
-import { _decorator, Button, Component, easing, Label, Node, tween, Tween, UIOpacity } from 'cc';
+import { _decorator, Component, easing, EventTarget, Label, Node, tween, Tween, UIOpacity } from 'cc';
 import { normalizeAngleDeg360, slotNumberToColor } from '../RedBlackRandom';
-import { getRouletteGameOrNull } from '../di/rouletteGameBindings';
-import type { RouletteGameController } from '../controller/RouletteGameController';
-import type { SpinFinalizeOutcome } from '../model/RouletteGameModel';
+import type { RouletteGameSession, SpinFinalizeOutcome } from '../ecs/RouletteEcs';
+import { Button } from '../UI/Button';
 
 const { ccclass, property } = _decorator;
 
 @ccclass('RouletteGameView')
 export class RouletteGameView extends Component {
+    static readonly EventType = {
+        SPIN: 'spin',
+    } as const;
+
     @property({
         type: Button,
         tooltip: 'Кнопка спина',
@@ -41,6 +44,12 @@ export class RouletteGameView extends Component {
     })
     lastResultLabel: Label | null = null;
 
+    @property({
+        type: UIOpacity,
+        tooltip: 'UIOpacity для мигания last result label',
+    })
+    lastResultLabelOpacity: UIOpacity | null = null;
+
     @property({ tooltip: 'Сколько полных циклов мигания после закрытия попапа win/lose' })
     lastResultBlinkCount = 3;
 
@@ -52,30 +61,29 @@ export class RouletteGameView extends Component {
 
     private _tween: Tween<Node> | null = null;
     private _busy = false;
-    private _game: RouletteGameController | null = null;
+    private _game: RouletteGameSession | null = null;
+    private readonly _events = new EventTarget();
 
     onLoad() {
         if (this.spinButton) {
-            this.spinButton.node.on(Button.EventType.CLICK, this.onClickSpin, this);
+            this.spinButton.on(Button.EventType.CLICK, this.onClickSpin, this);
         }
     }
 
     onDestroy() {
         if (this.spinButton) {
-            this.spinButton.node.off(Button.EventType.CLICK, this.onClickSpin, this);
+            this.spinButton.off(Button.EventType.CLICK, this.onClickSpin, this);
         }
         this._tween?.stop();
         this.stopLastResultBlink();
     }
 
     private stopLastResultBlink(): void {
-        const label = this.lastResultLabel;
-        if (label?.isValid) {
-            const op = label.node.getComponent(UIOpacity);
-            if (op) {
-                Tween.stopAllByTarget(op);
-            }
+        const opacity = this.lastResultLabelOpacity;
+        if (!opacity) {
+            return;
         }
+        Tween.stopAllByTarget(opacity);
     }
 
     private formatLastResultFromOutcome(outcome: SpinFinalizeOutcome): string {
@@ -96,7 +104,7 @@ export class RouletteGameView extends Component {
 
     private setLastResultLabel(outcome: SpinFinalizeOutcome): void {
         const label = this.lastResultLabel;
-        if (!label?.isValid) {
+        if (!label) {
             return;
         }
         label.string = this.formatLastResultFromOutcome(outcome);
@@ -104,12 +112,9 @@ export class RouletteGameView extends Component {
 
     private playLastResultBlink(): void {
         const label = this.lastResultLabel;
-        if (!label?.isValid) {
+        const uiOp = this.lastResultLabelOpacity;
+        if (!label || !uiOp) {
             return;
-        }
-        let uiOp = label.node.getComponent(UIOpacity);
-        if (!uiOp) {
-            uiOp = label.node.addComponent(UIOpacity);
         }
         Tween.stopAllByTarget(uiOp);
         const full = 255;
@@ -124,19 +129,20 @@ export class RouletteGameView extends Component {
         chain.start();
     }
 
-    private game(): RouletteGameController | null {
-        if (this._game) {
-            return this._game;
-        }
-        const session = getRouletteGameOrNull();
-        if (session?.isValid) {
-            const ctrl = session.game;
-            if (ctrl) {
-                this._game = ctrl;
-                return ctrl;
-            }
-        }
-        return null;
+    private game(): RouletteGameSession | null {
+        return this._game;
+    }
+
+    bindGame(session: RouletteGameSession | null): void {
+        this._game = session;
+    }
+
+    on(type: string, callback: (...args: unknown[]) => void, target?: unknown): void {
+        this._events.on(type, callback, target);
+    }
+
+    off(type: string, callback?: (...args: unknown[]) => void, target?: unknown): void {
+        this._events.off(type, callback, target);
     }
 
     private resolveSpinTarget(): Node {
@@ -151,20 +157,22 @@ export class RouletteGameView extends Component {
     }
 
     onClickSpin() {
-        if (this._busy) {
+        this._events.emit(RouletteGameView.EventType.SPIN);
+    }
+
+    playSpin(session: RouletteGameSession): void {
+        if (this._busy || !session.beginSpinRound()) {
             return;
         }
-        const ctrl = this.game();
-        if (!ctrl || !ctrl.beginSpinRound()) {
-            return;
-        }
+
+        this.bindGame(session);
         const target = this.resolveSpinTarget();
         this._busy = true;
         const from = target.angle;
 
-        const slot = ctrl.pickRandomSlot1to8();
+        const slot = session.pickRandomSlot1to8();
         const color = slotNumberToColor(slot);
-        const targetAngle = ctrl.wheelAngleForSlot(
+        const targetAngle = session.wheelAngleForSlot(
             slot,
             this.initialWheelAngleDeg,
             this.slotAngleOffsetDeg,
@@ -182,15 +190,10 @@ export class RouletteGameView extends Component {
             )
             .call(() => {
                 this._tween = null;
-                const ctrl = this.game();
-                if (!ctrl) {
-                    this._busy = false;
-                    return;
-                }
-                const outcome = ctrl.finalizeSpin(color);
+                const outcome = session.finalizeSpin(color);
                 this.setLastResultLabel(outcome);
                 const blinkAfterPopUp = outcome.kind === 'win' || outcome.kind === 'lose';
-                ctrl.onceSpinUiUnlocked(() => {
+                session.onceSpinUiUnlocked(() => {
                     if (blinkAfterPopUp) {
                         this.playLastResultBlink();
                     }

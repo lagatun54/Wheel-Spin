@@ -1,16 +1,16 @@
-import { _decorator, Component, easing, Label, tween, Tween } from 'cc';
+import { _decorator, Component, easing, EventTarget, Label, tween, Tween } from 'cc';
 import { Button } from '../UI/Button';
 
 const { ccclass, property } = _decorator;
 
-export type PlayerBalanceBetHandlers = {
-    onAdd10: () => void;
-    onAdd50: () => void;
-    onResetBet: () => void;
-};
-
 @ccclass('PlayerBalanceView')
 export class PlayerBalanceView extends Component {
+    static readonly EventType = {
+        ADD_BET_10: 'add-bet-10',
+        ADD_BET_50: 'add-bet-50',
+        RESET_BET: 'reset-bet',
+    } as const;
+
     @property({ type: Label, tooltip: 'Текущий баланс' })
     balanceLabel: Label | null = null;
 
@@ -29,44 +29,39 @@ export class PlayerBalanceView extends Component {
     @property({ tooltip: 'Длительность анимации прибавления выигрыша к балансу, сек' })
     winCountUpDuration = 0.85;
 
+    private readonly _events = new EventTarget();
     private _balanceTween: Tween<{ v: number }> | null = null;
-    private _betHandlers: PlayerBalanceBetHandlers | null = null;
 
     public onClickBetAdd10(): void {
-        this._betHandlers?.onAdd10();
+        this._events.emit(PlayerBalanceView.EventType.ADD_BET_10);
     }
 
     public onClickBetAdd50(): void {
-        this._betHandlers?.onAdd50();
+        this._events.emit(PlayerBalanceView.EventType.ADD_BET_50);
     }
 
     public onClickBetReset(): void {
-        this._betHandlers?.onResetBet();
+        this._events.emit(PlayerBalanceView.EventType.RESET_BET);
     }
 
-    bindBetHandlers(handlers: PlayerBalanceBetHandlers): void {
-        this.unbindBetHandlers();
-        this._betHandlers = handlers;
-        if (this.addBet10Button) {
-            this.addBet10Button.node.on(Button.EventType.CLICK, this.onClickBetAdd10, this);
-        }
-        if (this.addBet50Button) {
-            this.addBet50Button.node.on(Button.EventType.CLICK, this.onClickBetAdd50, this);
-        }
-        if (this.resetBetButton) {
-            this.resetBetButton.node.on(Button.EventType.CLICK, this.onClickBetReset, this);
-        }
+    on(type: string, callback: (...args: unknown[]) => void, target?: unknown): void {
+        this._events.on(type, callback, target);
     }
 
-    unbindBetHandlers(): void {
-        this.addBet10Button?.node.off(Button.EventType.CLICK, this.onClickBetAdd10, this);
-        this.addBet50Button?.node.off(Button.EventType.CLICK, this.onClickBetAdd50, this);
-        this.resetBetButton?.node.off(Button.EventType.CLICK, this.onClickBetReset, this);
-        this._betHandlers = null;
+    off(type: string, callback?: (...args: unknown[]) => void, target?: unknown): void {
+        this._events.off(type, callback, target);
+    }
+
+    onLoad(): void {
+        this.addBet10Button?.on(Button.EventType.CLICK, this.onClickBetAdd10, this);
+        this.addBet50Button?.on(Button.EventType.CLICK, this.onClickBetAdd50, this);
+        this.resetBetButton?.on(Button.EventType.CLICK, this.onClickBetReset, this);
     }
 
     onDestroy() {
-        this.unbindBetHandlers();
+        this.addBet10Button?.off(Button.EventType.CLICK, this.onClickBetAdd10, this);
+        this.addBet50Button?.off(Button.EventType.CLICK, this.onClickBetAdd50, this);
+        this.resetBetButton?.off(Button.EventType.CLICK, this.onClickBetReset, this);
         this._balanceTween?.stop();
     }
 

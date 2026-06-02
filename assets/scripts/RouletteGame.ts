@@ -1,9 +1,9 @@
 import { _decorator, Component } from 'cc';
-import { PlayerBalanceController } from './controller/PlayerBalanceController';
-import { RouletteBetController } from './controller/RouletteBetController';
-import { RouletteGameController, type RouletteGameControllerOptions } from './controller/RouletteGameController';
+import { getPopUpLoseViewOrNull, getPopUpWinViewOrNull } from './di/popupBindings';
+import { createRouletteEcsSession, type RouletteGameSession } from './ecs/RouletteEcs';
 import { PlayerBalanceView } from './view/PlayerBalanceView';
 import { RouletteBetView } from './view/RouletteBetView';
+import { RouletteGameView } from './view/RouletteGameView';
 
 const { ccclass, property } = _decorator;
 
@@ -18,12 +18,17 @@ export class RouletteGame extends Component {
     })
     betView: RouletteBetView | null = null;
 
+    @property({
+        type: RouletteGameView,
+        tooltip: 'View колеса/кнопки spin',
+    })
+    gameView: RouletteGameView | null = null;
+
     @property({ tooltip: 'Стартовый баланс при первом запуске сцены' })
     startingBalance = 1000;
 
-    private _controller: RouletteGameController | null = null;
-    private _balanceController: PlayerBalanceController | null = null;
-    private _betController: RouletteBetController | null = null;
+    private _session: RouletteGameSession | null = null;
+    private _resolvedGameView: RouletteGameView | null = null;
 
     onLoad() {
         const v = this.balanceView;
@@ -32,42 +37,83 @@ export class RouletteGame extends Component {
             return;
         }
 
-        const opts: RouletteGameControllerOptions = {
+        this._resolvedGameView = this.gameView;
+        this._session = createRouletteEcsSession({
             balanceView: v,
             betView: this.betView,
             startingBalance: this.startingBalance,
-        };
+            winPopUpView: getPopUpWinViewOrNull(),
+            losePopUpView: getPopUpLoseViewOrNull(),
+        });
 
-        this._controller = new RouletteGameController(opts);
+        this.bindUiEvents();
     }
 
     onDestroy() {
-        this._balanceController?.dispose();
-        this._betController?.dispose();
-        this._balanceController = null;
-        this._betController = null;
-        this._controller = null;
+        this.unbindUiEvents();
+        this._session?.dispose();
+        this._session = null;
+        this._resolvedGameView = null;
     }
 
     start() {
-        const game = this._controller;
-        const balance = this.balanceView;
-        if (game && balance?.isValid) {
-            this._balanceController = new PlayerBalanceController(balance, game.model);
-            this._balanceController.start();
-        }
-
-        const betView = this.betView;
-        if (game && balance?.isValid && betView?.isValid) {
-            this._betController = new RouletteBetController(betView, game.model);
-            this._betController.start();
-        }
-
-        game?.start();
-        this.scheduleOnce(() => this._controller?.refreshBalanceView(), 0);
+        this._session?.start();
     }
 
-    get game(): RouletteGameController | null {
-        return this._controller;
+    get game(): RouletteGameSession | null {
+        return this._session;
+    }
+
+    private bindUiEvents(): void {
+        const session = this._session;
+        if (!session) {
+            return;
+        }
+
+        this.balanceView?.on(PlayerBalanceView.EventType.ADD_BET_10, this.onAddBet10, this);
+        this.balanceView?.on(PlayerBalanceView.EventType.ADD_BET_50, this.onAddBet50, this);
+        this.balanceView?.on(PlayerBalanceView.EventType.RESET_BET, this.onResetBet, this);
+        this.betView?.on(RouletteBetView.EventType.SELECT_RED, this.onSelectRed, this);
+        this.betView?.on(RouletteBetView.EventType.SELECT_BLACK, this.onSelectBlack, this);
+        this._resolvedGameView?.bindGame(session);
+        this._resolvedGameView?.on(RouletteGameView.EventType.SPIN, this.onSpinRequested, this);
+    }
+
+    private unbindUiEvents(): void {
+        this.balanceView?.off(PlayerBalanceView.EventType.ADD_BET_10, this.onAddBet10, this);
+        this.balanceView?.off(PlayerBalanceView.EventType.ADD_BET_50, this.onAddBet50, this);
+        this.balanceView?.off(PlayerBalanceView.EventType.RESET_BET, this.onResetBet, this);
+        this.betView?.off(RouletteBetView.EventType.SELECT_RED, this.onSelectRed, this);
+        this.betView?.off(RouletteBetView.EventType.SELECT_BLACK, this.onSelectBlack, this);
+        this._resolvedGameView?.off(RouletteGameView.EventType.SPIN, this.onSpinRequested, this);
+        this._resolvedGameView?.bindGame(null);
+    }
+
+    private onAddBet10(): void {
+        this._session?.addToBet(10);
+    }
+
+    private onAddBet50(): void {
+        this._session?.addToBet(50);
+    }
+
+    private onResetBet(): void {
+        this._session?.resetBet();
+    }
+
+    private onSelectRed(): void {
+        this._session?.setBetColor('red');
+    }
+
+    private onSelectBlack(): void {
+        this._session?.setBetColor('black');
+    }
+
+    private onSpinRequested(): void {
+        const session = this._session;
+        if (!session) {
+            return;
+        }
+        this._resolvedGameView?.playSpin(session);
     }
 }

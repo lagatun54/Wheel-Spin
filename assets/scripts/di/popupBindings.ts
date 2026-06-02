@@ -1,52 +1,36 @@
 import { _decorator, Component } from 'cc';
 import { PopUpLoseView } from '../view/PopUpLoseView';
 import { PopUpWinView } from '../view/PopUpWinView';
-import { getContainer } from './container';
+import { getBinding, hasBinding, removeBinding, setBinding } from './container';
 import { TYPES } from './types';
 
 const { ccclass, property } = _decorator;
 
 export function getPopUpWinViewOrNull(): PopUpWinView | null {
-    const c = getContainer();
-    return c.isBound(TYPES.PopUpWinView) ? c.get<PopUpWinView>(TYPES.PopUpWinView) : null;
+    return getBinding<PopUpWinView>(TYPES.PopUpWinView);
 }
 
 export function getPopUpLoseViewOrNull(): PopUpLoseView | null {
-    const c = getContainer();
-    return c.isBound(TYPES.PopUpLoseView) ? c.get<PopUpLoseView>(TYPES.PopUpLoseView) : null;
+    return getBinding<PopUpLoseView>(TYPES.PopUpLoseView);
 }
 
 export function bindPopUpWinView(view: PopUpWinView | null): void {
-    const c = getContainer();
-    if (c.isBound(TYPES.PopUpWinView)) {
-        c.unbind(TYPES.PopUpWinView);
-    }
-    if (view) {
-        c.bind<PopUpWinView>(TYPES.PopUpWinView).toConstantValue(view);
-    }
+    setBinding(TYPES.PopUpWinView, view);
 }
 
 export function bindPopUpLoseView(view: PopUpLoseView | null): void {
-    const c = getContainer();
-    if (c.isBound(TYPES.PopUpLoseView)) {
-        c.unbind(TYPES.PopUpLoseView);
-    }
-    if (view) {
-        c.bind<PopUpLoseView>(TYPES.PopUpLoseView).toConstantValue(view);
-    }
+    setBinding(TYPES.PopUpLoseView, view);
 }
 
 export function unbindPopUpWinView(): void {
-    const c = getContainer();
-    if (c.isBound(TYPES.PopUpWinView)) {
-        c.unbind(TYPES.PopUpWinView);
+    if (hasBinding(TYPES.PopUpWinView)) {
+        removeBinding(TYPES.PopUpWinView);
     }
 }
 
 export function unbindPopUpLoseView(): void {
-    const c = getContainer();
-    if (c.isBound(TYPES.PopUpLoseView)) {
-        c.unbind(TYPES.PopUpLoseView);
+    if (hasBinding(TYPES.PopUpLoseView)) {
+        removeBinding(TYPES.PopUpLoseView);
     }
 }
 

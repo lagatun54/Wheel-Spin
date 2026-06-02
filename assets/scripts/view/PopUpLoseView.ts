@@ -1,5 +1,4 @@
 import { _decorator, AudioClip, AudioSource, easing, Label, Tween, tween } from 'cc';
-import type { PopUpLoseController } from '../controller/PopUpLoseController';
 import { PopUpView } from './PopUpView';
 
 const { ccclass, property } = _decorator;
@@ -18,7 +17,8 @@ export class PopUpLoseView extends PopUpView {
     @property({ type: AudioClip, tooltip: 'Звук при открытии окна проигрыша (не задан — без звука)' })
     openSound: AudioClip | null = null;
 
-    private _controller: PopUpLoseController | null = null;
+    @property({ type: AudioSource, tooltip: 'AudioSource для звука открытия' })
+    audioSource: AudioSource | null = null;
 
     private readonly _loseCountHolder = { value: 0 };
 
@@ -27,10 +27,6 @@ export class PopUpLoseView extends PopUpView {
     };
 
     private _spinUnlockOnDismiss?: () => void;
-
-    setController(controller: PopUpLoseController | null): void {
-        this._controller = controller;
-    }
 
     onDestroy() {
         this.stopLoseCountAnimation();
@@ -46,11 +42,7 @@ export class PopUpLoseView extends PopUpView {
         if (!this.openSound) {
             return;
         }
-        let source = this.node.getComponent(AudioSource);
-        if (!source) {
-            source = this.node.addComponent(AudioSource);
-        }
-        source.playOneShot(this.openSound);
+        this.audioSource?.playOneShot(this.openSound);
     }
 
     playScaleShowAnimation(duration: number, onComplete?: () => void): void {
@@ -101,16 +93,12 @@ export class PopUpLoseView extends PopUpView {
 
     hide(): void {
         this.unschedule(this._autoClose);
-        if (this._controller) {
-            this._controller.hideWithAnimation();
-        } else {
-            this.playScaleHideAnimation(this.hideAnimDuration, () => {
-                this.hideImmediate();
-                const cb = this._spinUnlockOnDismiss;
-                this._spinUnlockOnDismiss = undefined;
-                cb?.();
-            });
-        }
+        this.playScaleHideAnimation(this.hideAnimDuration, () => {
+            this.hideImmediate();
+            const cb = this._spinUnlockOnDismiss;
+            this._spinUnlockOnDismiss = undefined;
+            cb?.();
+        });
     }
 
     hideImmediate(): void {
@@ -119,11 +107,7 @@ export class PopUpLoseView extends PopUpView {
     }
 
     showLose(stake: number, onPopUpDismissed?: () => void): void {
-        if (this._controller) {
-            this._controller.showLose(stake, onPopUpDismissed);
-        } else {
-            this.renderLose(stake, onPopUpDismissed);
-        }
+        this.renderLose(stake, onPopUpDismissed);
     }
 
     renderLose(stake: number, onPopUpDismissed?: () => void): void {

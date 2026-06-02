@@ -2,6 +2,7 @@ import {
     _decorator,
     Button as CcButton,
     Component,
+    EventTarget,
     Node,
     easing,
     tween,
@@ -47,12 +48,14 @@ export class Button extends CcButton {
     releaseDuration = 0.28;
 
     private _baseScale = new Vec3(1, 1, 1);
+    private readonly _events = new EventTarget();
     private _scaleTween: Tween<Node> | null = null;
     private _showingPressedVisual = false;
 
     onLoad() {
         callButtonSuperLifecycle(this, 'onLoad');
         this.transition = CcButton.Transition.NONE;
+        this.node.on(Button.EventType.CLICK, this.onClick, this);
         const target = this.animateTarget ?? this.node;
         this._baseScale = target.scale.clone();
     }
@@ -66,8 +69,17 @@ export class Button extends CcButton {
 
     onDestroy() {
         this.removeTouchListeners();
+        this.node.off(Button.EventType.CLICK, this.onClick, this);
         this._scaleTween?.stop();
         callButtonSuperLifecycle(this, 'onDestroy');
+    }
+
+    on(type: string, callback: (...args: unknown[]) => void, target?: unknown): void {
+        this._events.on(type, callback, target);
+    }
+
+    off(type: string, callback?: (...args: unknown[]) => void, target?: unknown): void {
+        this._events.off(type, callback, target);
     }
 
     onDisable() {
@@ -98,6 +110,10 @@ export class Button extends CcButton {
         this.node.off(Node.EventType.TOUCH_START, this.onTouchStart, this);
         this.node.off(Node.EventType.TOUCH_END, this.onTouchEnd, this);
         this.node.off(Node.EventType.TOUCH_CANCEL, this.onTouchCancel, this);
+    }
+
+    private onClick(event?: Event): void {
+        this._events.emit(Button.EventType.CLICK, event);
     }
 
     private _releaseVisual() {

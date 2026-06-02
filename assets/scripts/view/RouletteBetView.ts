@@ -1,16 +1,16 @@
-import { _decorator, Component, UIOpacity } from 'cc';
+import { _decorator, Component, EventTarget, UIOpacity } from 'cc';
 import type { RouletteColor } from '../RedBlackRandom';
 import { Button } from '../UI/Button';
 
 const { ccclass, property } = _decorator;
 
-export type RouletteBetHandlers = {
-    onRed: () => void;
-    onBlack: () => void;
-};
-
 @ccclass('RouletteBetView')
 export class RouletteBetView extends Component {
+    static readonly EventType = {
+        SELECT_RED: 'select-red',
+        SELECT_BLACK: 'select-black',
+    } as const;
+
     @property({ type: Button, tooltip: 'Кнопка ставки на красное' })
     redBetButton: Button | null = null;
 
@@ -29,25 +29,22 @@ export class RouletteBetView extends Component {
     @property({ tooltip: 'Прозрачность кнопки выбранного цвета' })
     selectedOpacity = 255;
 
-    private _handlers: RouletteBetHandlers | null = null;
+    private readonly _events = new EventTarget();
 
     public onClickBetRed(): void {
-        this._handlers?.onRed();
+        this._events.emit(RouletteBetView.EventType.SELECT_RED);
     }
 
     public onClickBetBlack(): void {
-        this._handlers?.onBlack();
+        this._events.emit(RouletteBetView.EventType.SELECT_BLACK);
     }
 
-    bindBetHandlers(handlers: RouletteBetHandlers): void {
-        this.unbindBetHandlers();
-        this._handlers = handlers;
-        if (this.redBetButton) {
-            this.redBetButton.node.on(Button.EventType.CLICK, this.onClickBetRed, this);
-        }
-        if (this.blackBetButton) {
-            this.blackBetButton.node.on(Button.EventType.CLICK, this.onClickBetBlack, this);
-        }
+    on(type: string, callback: (...args: unknown[]) => void, target?: unknown): void {
+        this._events.on(type, callback, target);
+    }
+
+    off(type: string, callback?: (...args: unknown[]) => void, target?: unknown): void {
+        this._events.off(type, callback, target);
     }
 
     applyBetColorHighlight(color: RouletteColor | null): void {
@@ -65,13 +62,14 @@ export class RouletteBetView extends Component {
         op.opacity = fullBrightness ? this.selectedOpacity : this.dimmedOpacity;
     }
 
-    unbindBetHandlers(): void {
-        this.redBetButton?.node.off(Button.EventType.CLICK, this.onClickBetRed, this);
-        this.blackBetButton?.node.off(Button.EventType.CLICK, this.onClickBetBlack, this);
-        this._handlers = null;
+    onLoad(): void {
+        this.redBetButton?.on(Button.EventType.CLICK, this.onClickBetRed, this);
+        this.blackBetButton?.on(Button.EventType.CLICK, this.onClickBetBlack, this);
     }
 
     onDestroy() {
-        this.unbindBetHandlers();
+        this.redBetButton?.off(Button.EventType.CLICK, this.onClickBetRed, this);
+        this.blackBetButton?.off(Button.EventType.CLICK, this.onClickBetBlack, this);
     }
+
 }
