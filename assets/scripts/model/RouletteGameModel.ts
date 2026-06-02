@@ -1,10 +1,8 @@
 import type { RouletteColor } from '../RedBlackRandom';
 
-export type BeginSpinFailureReason = 'no_stake' | 'no_color' | 'insufficient_funds';
-
-export type BeginSpinResult =
-    | { ok: true }
-    | { ok: false; reason: BeginSpinFailureReason };
+// =============================================================================
+// Data
+// =============================================================================
 
 export type RouletteGameState = {
     balance: number;
@@ -22,19 +20,22 @@ export type RouletteGameAction =
     | { type: 'spin/finalize'; resultColor: RouletteColor }
     | { type: 'balance/commit_win'; toBalance: number };
 
+export type BeginSpinFailureReason = 'no_stake' | 'no_color' | 'insufficient_funds';
+
+export type BeginSpinResult =
+    | { ok: true }
+    | { ok: false; reason: BeginSpinFailureReason };
+
 export type SpinFinalizeOutcome =
     | { kind: 'idle' }
     | { kind: 'refund_no_color'; refund: number }
     | { kind: 'lose'; stake: number }
     | { kind: 'win'; stake: number; fromBalance: number; toBalance: number };
 
-export type RouletteGameCommand =
-    | { type: 'none' }
-    | { type: 'refresh_balance' }
-    | { type: 'sync_bet_color' }
-    | { type: 'show_lose_popup'; stake: number }
-    | { type: 'show_win_popup'; payout: number }
-    | { type: 'animate_balance'; fromBalance: number; toBalance: number };
+export type ApplyActionResult = {
+    state: RouletteGameState;
+    spinOutcome?: SpinFinalizeOutcome;
+};
 
 export function createRouletteGameState(startingBalance = 0): RouletteGameState {
     return {
@@ -45,182 +46,127 @@ export function createRouletteGameState(startingBalance = 0): RouletteGameState 
     };
 }
 
-function setBetColor(state: RouletteGameState, color: RouletteColor): RouletteGameState {
-    return { ...state, betColor: color };
+// =============================================================================
+// Queries — читают state, ничего не меняют
+// =============================================================================
+
+export function canBeginSpin(state: RouletteGameState): BeginSpinResult {
+    if (state.bet <= 0) {
+        return { ok: false, reason: 'no_stake' };
+    }
+    if (state.betColor == null) {
+        return { ok: false, reason: 'no_color' };
+    }
+    if (state.bet > state.balance) {
+        return { ok: false, reason: 'insufficient_funds' };
+    }
+    return { ok: true };
 }
 
-function clearBetColor(state: RouletteGameState): RouletteGameState {
-    return { ...state, betColor: null };
-}
+// =============================================================================
+// Mutations — чистые функции: state in → state out
+// =============================================================================
 
-function addToBet(state: RouletteGameState, delta: number, maxByBalance: boolean): RouletteGameState {
-    if (delta <= 0) {
+export function addBet(
+    state: RouletteGameState,
+    delta: number,
+    maxByBalance: boolean,
+): RouletteGameState {
+    if (delta <= 0 || state.balance <= 0) {
         return state;
     }
-    if (state.balance <= 0) {
-        return state;
-    }
 
+    const nextBet = state.bet + delta;
     return {
         ...state,
-        bet: maxByBalance ? Math.min(state.bet + delta, state.balance) : state.bet + delta,
+        bet: maxByBalance ? Math.min(nextBet, state.balance) : nextBet,
     };
 }
 
-function resetBetAmount(state: RouletteGameState): RouletteGameState {
+export function resetBet(state: RouletteGameState): RouletteGameState {
     return { ...state, bet: 0 };
 }
 
-function beginSpinRound(state: RouletteGameState): {
-    state: RouletteGameState;
-    result: BeginSpinResult;
-} {
-    if (state.bet <= 0) {
-        return { state, result: { ok: false, reason: 'no_stake' } };
-    }
-    if (state.betColor == null) {
-        return { state, result: { ok: false, reason: 'no_color' } };
-    }
-    if (state.bet > state.balance) {
-        return { state, result: { ok: false, reason: 'insufficient_funds' } };
-    }
-
-    return {
-        state: {
-            ...state,
-            pendingStake: state.bet,
-        },
-        result: { ok: true },
-    };
+export function setBetColor(state: RouletteGameState, color: RouletteColor): RouletteGameState {
+    return { ...state, betColor: color };
 }
 
-function finalizeSpin(state: RouletteGameState, resultColor: RouletteColor): {
-    state: RouletteGameState;
-    outcome: SpinFinalizeOutcome;
-} {
+export function clearBetColor(state: RouletteGameState): RouletteGameState {
+    return { ...state, betColor: null };
+}
+
+export function lockStakeForSpin(state: RouletteGameState): RouletteGameState {
+    return { ...state, pendingStake: state.bet };
+}
+
+export function settleSpin(
+    state: RouletteGameState,
+    resultColor: RouletteColor,
+): { state: RouletteGameState; outcome: SpinFinalizeOutcome } {
     const stake = state.pendingStake;
     if (stake <= 0) {
         return { state, outcome: { kind: 'idle' } };
     }
 
+    const clearedState: RouletteGameState = { ...state, pendingStake: 0 };
     const betColor = state.betColor;
+
     if (betColor == null) {
         return {
-            state: {
-                ...state,
-                pendingStake: 0,
-            },
+            state: clearedState,
             outcome: { kind: 'refund_no_color', refund: 0 },
         };
     }
 
-    const nextState = {
-        ...state,
-        pendingStake: 0,
-    };
-    const won = betColor === resultColor;
-
-    if (!won) {
+    if (betColor !== resultColor) {
         return {
-            state: {
-                ...nextState,
-                balance: nextState.balance - stake,
-            },
+            state: { ...clearedState, balance: clearedState.balance - stake },
             outcome: { kind: 'lose', stake },
         };
     }
 
-    const from = nextState.balance;
-    const to = from + stake;
+    const fromBalance = clearedState.balance;
+    const toBalance = fromBalance + stake;
     return {
-        state: nextState,
-        outcome: { kind: 'win', stake, fromBalance: from, toBalance: to },
+        state: clearedState,
+        outcome: { kind: 'win', stake, fromBalance, toBalance },
     };
 }
 
-function commitBalanceAfterWin(state: RouletteGameState, toBalance: number): RouletteGameState {
+export function commitWinBalance(state: RouletteGameState, toBalance: number): RouletteGameState {
     return { ...state, balance: toBalance };
 }
 
-export type RouletteGameReduceResult =
-    | { state: RouletteGameState; effect: { type: 'none' }; commands: RouletteGameCommand[] }
-    | { state: RouletteGameState; effect: { type: 'begin_spin'; result: BeginSpinResult }; commands: RouletteGameCommand[] }
-    | { state: RouletteGameState; effect: { type: 'finalize_spin'; outcome: SpinFinalizeOutcome }; commands: RouletteGameCommand[] };
+// =============================================================================
+// System — единая точка входа для контроллера
+// =============================================================================
 
-export function reduceRouletteGame(
+export function applyAction(
     state: RouletteGameState,
     action: RouletteGameAction,
-): RouletteGameReduceResult {
+): ApplyActionResult {
     switch (action.type) {
         case 'bet/add':
-            return {
-                state: addToBet(state, action.delta, action.maxByBalance),
-                effect: { type: 'none' },
-                commands: [{ type: 'refresh_balance' }],
-            };
+            return { state: addBet(state, action.delta, action.maxByBalance) };
+
         case 'bet/reset':
-            return {
-                state: resetBetAmount(state),
-                effect: { type: 'none' },
-                commands: [{ type: 'refresh_balance' }],
-            };
+            return { state: resetBet(state) };
+
         case 'bet/color_set':
-            return {
-                state: setBetColor(state, action.color),
-                effect: { type: 'none' },
-                commands: [{ type: 'sync_bet_color' }],
-            };
+            return { state: setBetColor(state, action.color) };
+
         case 'bet/color_clear':
-            return {
-                state: clearBetColor(state),
-                effect: { type: 'none' },
-                commands: [{ type: 'sync_bet_color' }],
-            };
-        case 'spin/begin': {
-            const result = beginSpinRound(state);
-            return {
-                state: result.state,
-                effect: { type: 'begin_spin', result: result.result },
-                commands: result.result.ok ? [{ type: 'refresh_balance' }] : [{ type: 'none' }],
-            };
-        }
+            return { state: clearBetColor(state) };
+
+        case 'spin/begin':
+            return { state: lockStakeForSpin(state) };
+
         case 'spin/finalize': {
-            const result = finalizeSpin(state, action.resultColor);
-            const commands =
-                result.outcome.kind === 'idle'
-                    ? [{ type: 'sync_bet_color' as const }]
-                    : result.outcome.kind === 'refund_no_color'
-                      ? [{ type: 'sync_bet_color' as const }, { type: 'refresh_balance' as const }]
-                      : result.outcome.kind === 'lose'
-                        ? [
-                              { type: 'sync_bet_color' as const },
-                              { type: 'refresh_balance' as const },
-                              { type: 'show_lose_popup' as const, stake: result.outcome.stake },
-                          ]
-                        : [
-                              { type: 'sync_bet_color' as const },
-                              { type: 'refresh_balance' as const },
-                              {
-                                  type: 'show_win_popup' as const,
-                                  payout: result.outcome.toBalance - result.outcome.fromBalance,
-                              },
-                              {
-                                  type: 'animate_balance' as const,
-                                  fromBalance: result.outcome.fromBalance,
-                                  toBalance: result.outcome.toBalance,
-                              },
-                          ];
-            return {
-                state: result.state,
-                effect: { type: 'finalize_spin', outcome: result.outcome },
-                commands,
-            };
+            const settled = settleSpin(state, action.resultColor);
+            return { state: settled.state, spinOutcome: settled.outcome };
         }
+
         case 'balance/commit_win':
-            return {
-                state: commitBalanceAfterWin(state, action.toBalance),
-                effect: { type: 'none' },
-                commands: [{ type: 'refresh_balance' }],
-            };
+            return { state: commitWinBalance(state, action.toBalance) };
     }
 }

@@ -1,7 +1,7 @@
 import { _decorator, Button, Component, easing, Label, Node, tween, Tween, UIOpacity } from 'cc';
+import type { RouletteGameSpinApi } from '../controller/RouletteGameController';
 import { normalizeAngleDeg360, slotNumberToColor } from '../RedBlackRandom';
-import { getRouletteGameOrNull } from '../di/rouletteGameBindings';
-import type { RouletteGameController } from '../controller/RouletteGameController';
+import { getRouletteGameSpinApiOrNull } from '../di/rouletteGameBindings';
 import type { SpinFinalizeOutcome } from '../model/RouletteGameModel';
 
 const { ccclass, property } = _decorator;
@@ -41,6 +41,12 @@ export class RouletteGameView extends Component {
     })
     lastResultLabel: Label | null = null;
 
+    @property({
+        type: UIOpacity,
+        tooltip: 'UIOpacity для мигания lastResultLabel; привяжите компонент из редактора',
+    })
+    lastResultLabelOpacity: UIOpacity | null = null;
+
     @property({ tooltip: 'Сколько полных циклов мигания после закрытия попапа win/lose' })
     lastResultBlinkCount = 3;
 
@@ -52,7 +58,7 @@ export class RouletteGameView extends Component {
 
     private _tween: Tween<Node> | null = null;
     private _busy = false;
-    private _game: RouletteGameController | null = null;
+    private _game: RouletteGameSpinApi | null = null;
 
     onLoad() {
         if (this.spinButton) {
@@ -69,12 +75,9 @@ export class RouletteGameView extends Component {
     }
 
     private stopLastResultBlink(): void {
-        const label = this.lastResultLabel;
-        if (label?.isValid) {
-            const op = label.node.getComponent(UIOpacity);
-            if (op) {
-                Tween.stopAllByTarget(op);
-            }
+        const opacity = this.lastResultLabelOpacity;
+        if (opacity?.isValid) {
+            Tween.stopAllByTarget(opacity);
         }
     }
 
@@ -104,37 +107,31 @@ export class RouletteGameView extends Component {
 
     private playLastResultBlink(): void {
         const label = this.lastResultLabel;
-        if (!label?.isValid) {
+        const opacity = this.lastResultLabelOpacity;
+        if (!label?.isValid || !opacity?.isValid) {
             return;
         }
-        let uiOp = label.node.getComponent(UIOpacity);
-        if (!uiOp) {
-            uiOp = label.node.addComponent(UIOpacity);
-        }
-        Tween.stopAllByTarget(uiOp);
+        Tween.stopAllByTarget(opacity);
         const full = 255;
         const dim = Math.max(0, Math.min(255, Math.floor(this.lastResultBlinkOpacity)));
         const phase = Math.max(0.02, this.lastResultBlinkPhaseSec);
         const n = Math.max(1, Math.floor(this.lastResultBlinkCount));
-        uiOp.opacity = full;
-        let chain = tween(uiOp);
+        opacity.opacity = full;
+        let chain = tween(opacity);
         for (let i = 0; i < n; i++) {
             chain = chain.to(phase, { opacity: dim }).to(phase, { opacity: full });
         }
         chain.start();
     }
 
-    private game(): RouletteGameController | null {
+    private game(): RouletteGameSpinApi | null {
         if (this._game) {
             return this._game;
         }
-        const session = getRouletteGameOrNull();
-        if (session?.isValid) {
-            const ctrl = session.game;
-            if (ctrl) {
-                this._game = ctrl;
-                return ctrl;
-            }
+        const game = getRouletteGameSpinApiOrNull();
+        if (game) {
+            this._game = game;
+            return game;
         }
         return null;
     }

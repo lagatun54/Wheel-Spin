@@ -145,7 +145,7 @@
     "_priority": 1073741824,
     "_fov": 45,
     "_fovAxis": 0,
-    "_orthoHeight": 396.8,
+    "_orthoHeight": 446.2283737024222,
     "_near": 1,
     "_far": 2000,
     "_color": {
@@ -582,6 +582,12 @@
     "initialStatusText": "Preparing game...",
     "preloadStatusText": "Loading assets...",
     "completeStatusText": "Starting game...",
+    "statusLabel": {
+      "__id__": 10
+    },
+    "progressLabel": {
+      "__id__": 13
+    },
     "_id": "6deeSknAFG2rttVP/TWSI2"
   },
   {

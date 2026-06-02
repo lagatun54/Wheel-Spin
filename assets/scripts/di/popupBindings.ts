@@ -1,4 +1,5 @@
 import { _decorator, Component } from 'cc';
+import type { RoulettePopupApi } from './contracts';
 import { PopUpLoseView } from '../view/PopUpLoseView';
 import { PopUpWinView } from '../view/PopUpWinView';
 import { getContainer } from './container';
@@ -14,6 +15,13 @@ export function getPopUpWinViewOrNull(): PopUpWinView | null {
 export function getPopUpLoseViewOrNull(): PopUpLoseView | null {
     const c = getContainer();
     return c.isBound(TYPES.PopUpLoseView) ? c.get<PopUpLoseView>(TYPES.PopUpLoseView) : null;
+}
+
+export function getRoulettePopupApiOrNull(): RoulettePopupApi | null {
+    const c = getContainer();
+    return c.isBound(TYPES.RoulettePopupApi)
+        ? c.get<RoulettePopupApi>(TYPES.RoulettePopupApi)
+        : null;
 }
 
 export function bindPopUpWinView(view: PopUpWinView | null): void {
@@ -36,6 +44,16 @@ export function bindPopUpLoseView(view: PopUpLoseView | null): void {
     }
 }
 
+export function bindRoulettePopupApi(api: RoulettePopupApi | null): void {
+    const c = getContainer();
+    if (c.isBound(TYPES.RoulettePopupApi)) {
+        c.unbind(TYPES.RoulettePopupApi);
+    }
+    if (api) {
+        c.bind<RoulettePopupApi>(TYPES.RoulettePopupApi).toConstantValue(api);
+    }
+}
+
 export function unbindPopUpWinView(): void {
     const c = getContainer();
     if (c.isBound(TYPES.PopUpWinView)) {
@@ -47,6 +65,13 @@ export function unbindPopUpLoseView(): void {
     const c = getContainer();
     if (c.isBound(TYPES.PopUpLoseView)) {
         c.unbind(TYPES.PopUpLoseView);
+    }
+}
+
+export function unbindRoulettePopupApi(): void {
+    const c = getContainer();
+    if (c.isBound(TYPES.RoulettePopupApi)) {
+        c.unbind(TYPES.RoulettePopupApi);
     }
 }
 
@@ -67,8 +92,26 @@ export class PopUpBindingsComponent extends Component {
     }
 
     protected applyBindings(): void {
-        bindPopUpWinView(this.resolveWinView());
-        bindPopUpLoseView(this.resolveLoseView());
+        const winView = this.resolveWinView();
+        const loseView = this.resolveLoseView();
+        bindPopUpWinView(winView);
+        bindPopUpLoseView(loseView);
+        bindRoulettePopupApi({
+            showWinPopUp: (payout, onPopUpDismissed) => {
+                if (!winView) {
+                    onPopUpDismissed?.();
+                    return;
+                }
+                winView.showWin(payout, onPopUpDismissed);
+            },
+            showLosePopUp: (stake, onPopUpDismissed) => {
+                if (!loseView) {
+                    onPopUpDismissed?.();
+                    return;
+                }
+                loseView.showLose(stake, onPopUpDismissed);
+            },
+        });
     }
 
     onLoad() {
@@ -78,5 +121,6 @@ export class PopUpBindingsComponent extends Component {
     onDestroy() {
         unbindPopUpWinView();
         unbindPopUpLoseView();
+        unbindRoulettePopupApi();
     }
 }

@@ -1,6 +1,11 @@
 import { _decorator, Component } from 'cc';
-import { PlayerBalanceController } from './controller/PlayerBalanceController';
-import { RouletteBetController } from './controller/RouletteBetController';
+import {
+    bindPlayerBalanceView,
+    bindRouletteBetView,
+    showLosePopUp,
+    showWinPopUp,
+    type ViewBindingDispose,
+} from './controller/RouletteGameUi';
 import { RouletteGameController, type RouletteGameControllerOptions } from './controller/RouletteGameController';
 import { PlayerBalanceView } from './view/PlayerBalanceView';
 import { RouletteBetView } from './view/RouletteBetView';
@@ -22,8 +27,8 @@ export class RouletteGame extends Component {
     startingBalance = 1000;
 
     private _controller: RouletteGameController | null = null;
-    private _balanceController: PlayerBalanceController | null = null;
-    private _betController: RouletteBetController | null = null;
+    private _disposeBalanceBinding: ViewBindingDispose | null = null;
+    private _disposeBetBinding: ViewBindingDispose | null = null;
 
     onLoad() {
         const v = this.balanceView;
@@ -32,35 +37,61 @@ export class RouletteGame extends Component {
             return;
         }
 
+        const betView = this.betView;
         const opts: RouletteGameControllerOptions = {
-            balanceView: v,
-            betView: this.betView,
             startingBalance: this.startingBalance,
+            onBalanceChanged: (state) => {
+                if (v.isValid) {
+                    v.setBalanceAndBet(state.balance, state.bet);
+                }
+            },
+            onBetColorChanged: (state) => {
+                if (betView?.isValid) {
+                    betView.applyBetColorHighlight(state.betColor);
+                }
+            },
+            onShowLosePopup: (stake, onDismissed) => {
+                showLosePopUp(stake, onDismissed);
+            },
+            onShowWinPopup: (payout, onDismissed) => {
+                showWinPopUp(payout, onDismissed);
+            },
+            onAnimateBalance: (fromBalance, toBalance, onComplete) => {
+                if (v.isValid) {
+                    v.animateBalance(fromBalance, toBalance, onComplete);
+                } else {
+                    onComplete();
+                }
+            },
         };
 
         this._controller = new RouletteGameController(opts);
     }
 
     onDestroy() {
-        this._balanceController?.dispose();
-        this._betController?.dispose();
-        this._balanceController = null;
-        this._betController = null;
+        this._disposeBalanceBinding?.();
+        this._disposeBetBinding?.();
+        this._disposeBalanceBinding = null;
+        this._disposeBetBinding = null;
         this._controller = null;
     }
 
     start() {
         const game = this._controller;
         const balance = this.balanceView;
+        const betView = this.betView;
         if (game && balance?.isValid) {
-            this._balanceController = new PlayerBalanceController(balance, game);
-            this._balanceController.start();
+            this._disposeBalanceBinding = bindPlayerBalanceView(balance, {
+                dispatch: (action) => game.dispatch(action),
+                getState: () => game.state,
+            });
         }
 
-        const betView = this.betView;
         if (game && balance?.isValid && betView?.isValid) {
-            this._betController = new RouletteBetController(betView, game);
-            this._betController.start();
+            this._disposeBetBinding = bindRouletteBetView(betView, {
+                dispatch: (action) => game.dispatch(action),
+                getState: () => game.state,
+            });
         }
 
         game?.start();

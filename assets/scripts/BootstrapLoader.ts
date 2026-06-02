@@ -16,8 +16,12 @@ export class BootstrapLoader extends Component {
     @property({ tooltip: 'Текст перед переходом в игру' })
     completeStatusText = 'Starting game...';
 
-    private _statusLabel: Label | null = null;
-    private _progressLabel: Label | null = null;
+    @property(Label)
+    statusLabel: Label | null = null;
+
+    @property(Label)
+    progressLabel: Label | null = null;
+
     private _started = false;
 
     start(): void {
@@ -25,28 +29,21 @@ export class BootstrapLoader extends Component {
             return;
         }
         this._started = true;
-        this.resolveLabels();
         this.setStatus(this.initialStatusText);
         this.setProgress(0);
         this.preloadAndLaunch();
     }
 
-    private resolveLabels(): void {
-        const canvas = this.node.scene?.getChildByName('Canvas') ?? null;
-        this._statusLabel = canvas?.getChildByName('StatusLabel')?.getComponent(Label) ?? null;
-        this._progressLabel = canvas?.getChildByName('ProgressLabel')?.getComponent(Label) ?? null;
-    }
-
     private setStatus(text: string): void {
-        if (this._statusLabel?.isValid) {
-            this._statusLabel.string = text;
+        if (this.statusLabel?.isValid) {
+            this.statusLabel.string = text;
         }
     }
 
     private setProgress(value: number): void {
         const normalized = Math.max(0, Math.min(1, value));
-        if (this._progressLabel?.isValid) {
-            this._progressLabel.string = `${Math.round(normalized * 100)}%`;
+        if (this.progressLabel?.isValid) {
+            this.progressLabel.string = `${Math.round(normalized * 100)}%`;
         }
     }
 
