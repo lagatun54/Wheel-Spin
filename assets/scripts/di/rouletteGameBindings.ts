@@ -1,5 +1,4 @@
 import { _decorator, Component } from 'cc';
-import { RouletteGame } from '../RouletteGame';
 import { getBinding, hasBinding, removeBinding, setBinding } from './container';
 import { TYPES } from './types';
 
@@ -25,8 +24,8 @@ export function unbindRouletteGame(): void {
 
 @ccclass('RouletteGameBindings')
 export class RouletteGameBindingsComponent extends Component {
-    @property({ type: RouletteGame, tooltip: 'Ссылка на компонент RouletteGame' })
-    rouletteGame: RouletteGame | null = null;
+    @property({ type: Component, tooltip: 'Ссылка на компонент RouletteGame' })
+    rouletteGame: Component | null = null;
 
     protected applyBindings(): void {
         bindRouletteGame(this.rouletteGame as RouletteGameBinding | null);
