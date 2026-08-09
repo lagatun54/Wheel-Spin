@@ -51,6 +51,17 @@ export class RouletteGameController {
         betView.applyBetColorHighlight(this._model.betColor);
     }
 
+    private setBettingInputInteractable(interactable: boolean): void {
+        const balanceView = this.balanceView;
+        if (balanceView) {
+            balanceView.setButtonsInteractable(interactable);
+        }
+        const betView = this._betView;
+        if (betView?.isValid) {
+            betView.setButtonsInteractable(interactable);
+        }
+    }
+
     beginSpinRound(): boolean {
         if (this._spinInputLocked) {
             return false;
@@ -59,8 +70,16 @@ export class RouletteGameController {
         if (result.ok === false) {
             return false;
         }
+        this._spinInputLocked = true;
+        this.setBettingInputInteractable(false);
         this.refreshBalanceView();
         return true;
+    }
+
+    abortSpinRound(): void {
+        if (this._spinInputLocked) {
+            this.notifySpinUiUnlocked();
+        }
     }
 
     onceSpinUiUnlocked(cb: () => void): void {
@@ -72,8 +91,15 @@ export class RouletteGameController {
         }
     }
 
+    waitForSpinUiUnlockedAsync(): Promise<void> {
+        return new Promise((resolve) => {
+            this.onceSpinUiUnlocked(resolve);
+        });
+    }
+
     private notifySpinUiUnlocked(): void {
         this._spinInputLocked = false;
+        this.setBettingInputInteractable(true);
         for (const fn of this._spinUiUnlockListeners.values()) {
             fn();
         }
@@ -95,17 +121,18 @@ export class RouletteGameController {
         this.syncBetColorSelectionView();
 
         if (outcome.kind === 'idle') {
+            this.notifySpinUiUnlocked();
             return outcome;
         }
 
         if (outcome.kind === 'refund_no_color') {
             this.refreshBalanceView();
+            this.notifySpinUiUnlocked();
             return outcome;
         }
 
         if (outcome.kind === 'lose') {
             this.refreshBalanceView();
-            this._spinInputLocked = true;
             RouletteBetController.showLosePopUp(outcome.stake, () => this.notifySpinUiUnlocked());
             return outcome;
         }
@@ -113,7 +140,6 @@ export class RouletteGameController {
         const { fromBalance, toBalance } = outcome;
         this.refreshBalanceView();
 
-        this._spinInputLocked = true;
         RouletteBetController.showWinPopUp(toBalance - fromBalance, () => this.notifySpinUiUnlocked());
 
         const view = this.balanceView;

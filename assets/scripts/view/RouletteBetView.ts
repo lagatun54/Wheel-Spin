@@ -71,6 +71,15 @@ export class RouletteBetView extends Component {
         this._handlers = null;
     }
 
+    setButtonsInteractable(interactable: boolean): void {
+        if (this.redBetButton?.isValid) {
+            this.redBetButton.interactable = interactable;
+        }
+        if (this.blackBetButton?.isValid) {
+            this.blackBetButton.interactable = interactable;
+        }
+    }
+
     onDestroy() {
         this.unbindBetHandlers();
     }

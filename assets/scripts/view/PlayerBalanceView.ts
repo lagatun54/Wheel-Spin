@@ -65,6 +65,18 @@ export class PlayerBalanceView extends Component {
         this._betHandlers = null;
     }
 
+    setButtonsInteractable(interactable: boolean): void {
+        if (this.addBet10Button?.isValid) {
+            this.addBet10Button.interactable = interactable;
+        }
+        if (this.addBet50Button?.isValid) {
+            this.addBet50Button.interactable = interactable;
+        }
+        if (this.resetBetButton?.isValid) {
+            this.resetBetButton.interactable = interactable;
+        }
+    }
+
     onDestroy() {
         this.unbindBetHandlers();
         this._balanceTween?.stop();

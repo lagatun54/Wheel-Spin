@@ -59,45 +59,35 @@ export class Button extends CcButton {
 
     onEnable() {
         callButtonSuperLifecycle(this, 'onEnable');
-        this.node.on(Node.EventType.TOUCH_START, this.onTouchStart, this);
-        this.node.on(Node.EventType.TOUCH_END, this.onTouchEnd, this);
-        this.node.on(Node.EventType.TOUCH_CANCEL, this.onTouchCancel, this);
+        this.node.on(CcButton.EventType.CLICK, this.onClick, this);
     }
 
     onDestroy() {
-        this.removeTouchListeners();
+        this.removeClickListeners();
         this._scaleTween?.stop();
         callButtonSuperLifecycle(this, 'onDestroy');
     }
 
     onDisable() {
-        this.removeTouchListeners();
+        this.removeClickListeners();
         this._releaseVisual();
         callButtonSuperLifecycle(this, 'onDisable');
     }
 
-    private onTouchStart(): void {
+    private onClick(): void {
         if (!this.interactable || !this.enabledInHierarchy) {
             return;
         }
+
         this._showingPressedVisual = true;
-        this._tweenToPressed();
+        this._tweenToPressed(() => {
+            this._showingPressedVisual = false;
+            this._tweenToReleased();
+        });
     }
 
-    private onTouchEnd(): void {
-        this._showingPressedVisual = false;
-        this._tweenToReleased();
-    }
-
-    private onTouchCancel(): void {
-        this._showingPressedVisual = false;
-        this._tweenToReleased();
-    }
-
-    private removeTouchListeners(): void {
-        this.node.off(Node.EventType.TOUCH_START, this.onTouchStart, this);
-        this.node.off(Node.EventType.TOUCH_END, this.onTouchEnd, this);
-        this.node.off(Node.EventType.TOUCH_CANCEL, this.onTouchCancel, this);
+    private removeClickListeners(): void {
+        this.node.off(CcButton.EventType.CLICK, this.onClick, this);
     }
 
     private _releaseVisual() {
@@ -108,7 +98,7 @@ export class Button extends CcButton {
         target.setScale(this._baseScale);
     }
 
-    private _tweenToPressed() {
+    private _tweenToPressed(onComplete?: () => void) {
         const target = this.animateTarget ?? this.node;
         const p = this.pressedScale;
         const s = this._baseScale;
@@ -120,6 +110,7 @@ export class Button extends CcButton {
         this._scaleTween?.stop();
         this._scaleTween = tween(target)
             .to(this.pressDuration, { scale: to }, { easing: easing.sineOut })
+            .call(() => onComplete?.())
             .start();
     }
 

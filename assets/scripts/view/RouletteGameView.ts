@@ -53,6 +53,7 @@ export class RouletteGameView extends Component {
     private _tween: Tween<Node> | null = null;
     private _busy = false;
     private _game: RouletteGameController | null = null;
+    private _resolveSpinTween: (() => void) | null = null;
 
     onLoad() {
         if (this.spinButton) {
@@ -64,8 +65,16 @@ export class RouletteGameView extends Component {
         if (this.spinButton) {
             this.spinButton.node.off(Button.EventType.CLICK, this.onClickSpin, this);
         }
-        this._tween?.stop();
+        this.finishSpinTween();
         this.stopLastResultBlink();
+    }
+
+    private finishSpinTween(): void {
+        this._tween?.stop();
+        this._tween = null;
+        const resolve = this._resolveSpinTween;
+        this._resolveSpinTween = null;
+        resolve?.();
     }
 
     private stopLastResultBlink(): void {
@@ -150,7 +159,11 @@ export class RouletteGameView extends Component {
         return this.node;
     }
 
-    onClickSpin() {
+    onClickSpin(): void {
+        void this.playSpinRoundAsync();
+    }
+
+    private async playSpinRoundAsync(): Promise<void> {
         if (this._busy) {
             return;
         }
@@ -160,6 +173,7 @@ export class RouletteGameView extends Component {
         }
         const target = this.resolveSpinTarget();
         this._busy = true;
+        this.setSpinButtonInteractable(false);
         const from = target.angle;
 
         const slot = ctrl.pickRandomSlot1to8();
@@ -173,30 +187,57 @@ export class RouletteGameView extends Component {
         const minTurns = Math.max(1, Math.floor(this.fullTurns));
         const to = normalizedTargetAngle + minTurns * 360;
 
-        this._tween?.stop();
-        this._tween = tween(target)
-            .to(
-                this.duration,
-                { angle: to },
-                { easing: easing.sineOut },
-            )
-            .call(() => {
+        try {
+            await this.tweenSpinToAsync(target, to);
+            if (!this.isValid || !target.isValid) {
+                ctrl.abortSpinRound();
+                return;
+            }
+            const outcome = ctrl.finalizeSpin(color);
+            this.setLastResultLabel(outcome);
+            const blinkAfterPopUp = outcome.kind === 'win' || outcome.kind === 'lose';
+            await ctrl.waitForSpinUiUnlockedAsync();
+            if (!this.isValid) {
+                return;
+            }
+            if (blinkAfterPopUp) {
+                this.playLastResultBlink();
+            }
+        } finally {
+            this._busy = false;
+            this.setSpinButtonInteractable(true);
+        }
+    }
+
+    private setSpinButtonInteractable(interactable: boolean): void {
+        if (this.spinButton?.isValid) {
+            this.spinButton.interactable = interactable;
+        }
+    }
+
+    private tweenSpinToAsync(target: Node, to: number): Promise<void> {
+        return new Promise((resolve) => {
+            if (!target.isValid) {
+                resolve();
+                return;
+            }
+
+            const finish = () => {
                 this._tween = null;
-                const ctrl = this.game();
-                if (!ctrl) {
-                    this._busy = false;
-                    return;
-                }
-                const outcome = ctrl.finalizeSpin(color);
-                this.setLastResultLabel(outcome);
-                const blinkAfterPopUp = outcome.kind === 'win' || outcome.kind === 'lose';
-                ctrl.onceSpinUiUnlocked(() => {
-                    if (blinkAfterPopUp) {
-                        this.playLastResultBlink();
-                    }
-                    this._busy = false;
-                });
-            })
-            .start();
+                this._resolveSpinTween = null;
+                resolve();
+            };
+
+            this.finishSpinTween();
+            this._resolveSpinTween = resolve;
+            this._tween = tween(target)
+                .to(
+                    this.duration,
+                    { angle: to },
+                    { easing: easing.sineOut },
+                )
+                .call(finish)
+                .start();
+        });
     }
 }
