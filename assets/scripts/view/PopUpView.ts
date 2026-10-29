@@ -1,5 +1,7 @@
 import { _decorator, Component, easing, Label, Node, Tween, tween, Vec3 } from 'cc';
 
+import type { IPopUpController } from '../controller/PopUpController';
+
 const { ccclass, property } = _decorator;
 
 const COLLAPSED_EPS = 1e-3;
@@ -23,11 +25,18 @@ export class PopUpView extends Component {
     @property({ tooltip: 'Длительность скрытия (scale 1→0), сек' })
     hideAnimDuration = 0.18;
 
+    protected _controller: IPopUpController | null = null;
+
+    setController(controller: IPopUpController | null): void {
+        this._controller = controller;
+    }
+
     onLoad(): void {
         this.hideImmediate();
     }
 
     onDestroy(): void {
+        this._controller?.dispose();
         this.stopScaleTweens();
     }
 
@@ -105,6 +114,7 @@ export class PopUpView extends Component {
         this.stopScaleTweens();
         this.getAnimScaleNode().setScale(0, 0, 1);
         this.onAfterHide();
+        this._controller?.onViewHidden();
     }
 
     show(): void {
@@ -112,7 +122,7 @@ export class PopUpView extends Component {
     }
 
     hide(): void {
-        this.hideImmediate();
+        this._controller?.hideWithAnimation();
     }
 
     protected setWinAmount(amount: number): void {

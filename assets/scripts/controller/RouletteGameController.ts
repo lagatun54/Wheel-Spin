@@ -1,158 +1,68 @@
-import { pickRandomRouletteSlot5050, type RouletteColor } from '../RedBlackRandom';
+import { slotNumberToColor } from '../RedBlackRandom';
+import type { SpinRequest, SpinResponse } from '../network/FakeRouletteApi';
 import { RouletteGameModel, type SpinFinalizeOutcome } from '../model/RouletteGameModel';
-import { PlayerBalanceView } from '../view/PlayerBalanceView';
-import { RouletteBetView } from '../view/RouletteBetView';
-import { RouletteBetController } from './RouletteBetController';
+
+import type { PlayerBalanceView } from '../view/PlayerBalanceView';
+import type { RouletteGameView } from '../view/RouletteGameView';
 
 export type RouletteGameControllerOptions = {
     balanceView: PlayerBalanceView;
-    betView: RouletteBetView;
     startingBalance: number;
+    showResult: (outcome: SpinFinalizeOutcome) => Promise<void>;
+    requestSpin: (request: SpinRequest) => Promise<SpinResponse>;
 };
 
+/** Handles round commands; models own state and views observe it directly. */
 export class RouletteGameController {
-    private readonly _model = new RouletteGameModel();
-    private readonly _balanceView: PlayerBalanceView;
-    private readonly _betView: RouletteBetView;
-    private _spinInputLocked = false;
-    private readonly _spinUiUnlockListeners = new Map<number, () => void>();
-    private _spinUiUnlockListenerId = 0;
+    readonly model = new RouletteGameModel();
+    private _disposed = false;
 
-    constructor(options: RouletteGameControllerOptions) {
-        this._balanceView = options.balanceView;
-        this._betView = options.betView;
-        this._model.setStartingBalance(options.startingBalance);
+    constructor(private readonly options: RouletteGameControllerOptions) {
+        this.model.setStartingBalance(options.startingBalance);
     }
 
-    get model(): RouletteGameModel {
-        return this._model;
-    }
-
-    start(): void {
-        this.refreshBalanceView();
-    }
-
-    private get balanceView(): PlayerBalanceView | null {
-        return this._balanceView.isValid ? this._balanceView : null;
-    }
-
-    refreshBalanceView(): void {
-        const view = this.balanceView;
-        if (view) {
-            view.setBalanceAndBet(this._model.balance, this._model.bet);
-        }
-    }
-
-    private syncBetColorSelectionView(): void {
-        const betView = this._betView;
-        if (!betView?.isValid) {
+    async playRoundAsync(view: RouletteGameView): Promise<void> {
+        if (this._disposed || !view.isValid || !view.enabledInHierarchy || !this.model.beginSpinRound().ok) {
             return;
         }
-        betView.applyBetColorHighlight(this._model.betColor);
-    }
+        try {
+            const round = this.model.getSnapshot().round;
+            if (round.phase !== 'spinning') return;
+            const { slot } = await this.options.requestSpin({ stake: round.stake, color: round.color });
+            if (this._disposed || !view.isValid || !view.enabledInHierarchy) return;
+            const color = slotNumberToColor(slot);
+            if (!await view.playWheelAsync(slot) || this._disposed || !view.isValid || !view.enabledInHierarchy) {
+                return;
+            }
 
-    private setBettingInputInteractable(interactable: boolean): void {
-        const balanceView = this.balanceView;
-        if (balanceView) {
-            balanceView.setButtonsInteractable(interactable);
-        }
-        const betView = this._betView;
-        if (betView?.isValid) {
-            betView.setButtonsInteractable(interactable);
-        }
-    }
-
-    beginSpinRound(): boolean {
-        if (this._spinInputLocked) {
-            return false;
-        }
-        const result = this._model.beginSpinRound();
-        if (result.ok === false) {
-            return false;
-        }
-        this._spinInputLocked = true;
-        this.setBettingInputInteractable(false);
-        this.refreshBalanceView();
-        return true;
-    }
-
-    abortSpinRound(): void {
-        if (this._spinInputLocked) {
-            this.notifySpinUiUnlocked();
-        }
-    }
-
-    onceSpinUiUnlocked(cb: () => void): void {
-        if (!this._spinInputLocked) {
-            cb();
-        } else {
-            const id = ++this._spinUiUnlockListenerId;
-            this._spinUiUnlockListeners.set(id, cb);
+            const outcome = this.model.finalizeSpin(color);
+            view.showLastResult(outcome);
+            const balance = this.options.balanceView;
+            // The model has already committed the result. Animation changes display only.
+            const failures: unknown[] = [];
+            await Promise.all([
+                Promise.resolve().then(() => outcome.kind === 'win' && balance.isValid
+                    ? balance.animateBalanceAsync(outcome.fromBalance, outcome.toBalance)
+                    : undefined),
+                Promise.resolve().then(() => this.options.showResult(outcome)),
+            ].map((effect) => effect.catch((error) => {
+                failures.push(error);
+            })));
+            if (failures.length > 0) {
+                throw failures[0];
+            }
+            if (!this._disposed && view.isValid) {
+                view.playLastResultBlink();
+            }
+        } finally {
+            this.model.cancelSpinRound();
+            this.model.finishPresentation();
         }
     }
 
-    waitForSpinUiUnlockedAsync(): Promise<void> {
-        return new Promise((resolve) => {
-            this.onceSpinUiUnlocked(resolve);
-        });
-    }
-
-    private notifySpinUiUnlocked(): void {
-        this._spinInputLocked = false;
-        this.setBettingInputInteractable(true);
-        for (const fn of this._spinUiUnlockListeners.values()) {
-            fn();
-        }
-        this._spinUiUnlockListeners.clear();
-    }
-
-    wheelAngleForSlot(slot: number, initialWheelAngleDeg: number, slotAngleOffsetDeg: number): number {
-        const step = 360 / 8;
-        const slotCenterAngle = (slot - 1) * step;
-        return slotCenterAngle + initialWheelAngleDeg - slotAngleOffsetDeg;
-    }
-
-    pickRandomSlot1to8(): number {
-        return pickRandomRouletteSlot5050();
-    }
-
-    finalizeSpin(resultColor: RouletteColor): SpinFinalizeOutcome {
-        const outcome = this._model.finalizeSpin(resultColor);
-        this.syncBetColorSelectionView();
-
-        if (outcome.kind === 'idle') {
-            this.notifySpinUiUnlocked();
-            return outcome;
-        }
-
-        if (outcome.kind === 'refund_no_color') {
-            this.refreshBalanceView();
-            this.notifySpinUiUnlocked();
-            return outcome;
-        }
-
-        if (outcome.kind === 'lose') {
-            this.refreshBalanceView();
-            RouletteBetController.showLosePopUp(outcome.stake, () => this.notifySpinUiUnlocked());
-            return outcome;
-        }
-
-        const { fromBalance, toBalance } = outcome;
-        this.refreshBalanceView();
-
-        RouletteBetController.showWinPopUp(toBalance - fromBalance, () => this.notifySpinUiUnlocked());
-
-        const view = this.balanceView;
-        if (view) {
-            view.animateBalance(fromBalance, toBalance, () => {
-                this._model.commitBalanceAfterWin(toBalance);
-                view.setBalanceAndBet(this._model.balance, this._model.bet);
-            });
-        } else {
-            this._model.commitBalanceAfterWin(toBalance);
-            this.refreshBalanceView();
-        }
-
-        return outcome;
+    dispose(): void {
+        this._disposed = true;
+        this.model.cancelSpinRound();
+        this.model.finishPresentation();
     }
 }

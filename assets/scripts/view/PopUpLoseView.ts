@@ -18,23 +18,10 @@ export class PopUpLoseView extends PopUpView {
     @property({ type: AudioClip, tooltip: 'Звук при открытии окна проигрыша (не задан — без звука)' })
     openSound: AudioClip | null = null;
 
-    private _controller: PopUpLoseController | null = null;
-
     private readonly _loseCountHolder = { value: 0 };
-
-    private readonly _autoClose = () => {
-        this.hide();
-    };
-
-    private _spinUnlockOnDismiss?: () => void;
-
-    setController(controller: PopUpLoseController | null): void {
-        this._controller = controller;
-    }
 
     onDestroy() {
         this.stopLoseCountAnimation();
-        this.unschedule(this._autoClose);
         super.onDestroy();
     }
 
@@ -99,46 +86,7 @@ export class PopUpLoseView extends PopUpView {
         this.applyLoseStakeAnimated(stake);
     }
 
-    hide(): void {
-        this.unschedule(this._autoClose);
-        if (this._controller) {
-            this._controller.hideWithAnimation();
-        } else {
-            this.playScaleHideAnimation(this.hideAnimDuration, () => {
-                this.hideImmediate();
-                const cb = this._spinUnlockOnDismiss;
-                this._spinUnlockOnDismiss = undefined;
-                cb?.();
-            });
-        }
-    }
-
-    hideImmediate(): void {
-        this.unschedule(this._autoClose);
-        super.hideImmediate();
-    }
-
     showLose(stake: number, onPopUpDismissed?: () => void): void {
-        if (this._controller) {
-            this._controller.showLose(stake, onPopUpDismissed);
-        } else {
-            this.renderLose(stake, onPopUpDismissed);
-        }
-    }
-
-    renderLose(stake: number, onPopUpDismissed?: () => void): void {
-        this._spinUnlockOnDismiss = onPopUpDismissed;
-        this.applyLoseStake(stake);
-        this.playScaleShowAnimation(this.showAnimDuration, () => {
-            this.scheduleAutoClose();
-        });
-    }
-
-    scheduleAutoClose(): void {
-        this.unschedule(this._autoClose);
-        if (this.autoCloseSeconds <= 0) {
-            return;
-        }
-        this.scheduleOnce(this._autoClose, this.autoCloseSeconds);
+        (this._controller as PopUpLoseController | null)?.showLose(stake, onPopUpDismissed);
     }
 }

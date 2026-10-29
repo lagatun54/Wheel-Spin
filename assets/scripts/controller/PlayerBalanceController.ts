@@ -13,8 +13,6 @@ export class PlayerBalanceController {
             onAdd50: () => this.addToBet(50),
             onResetBet: () => this.resetBet(),
         });
-        const m = this.model;
-        this.view.setBalanceAndBet(m.balance, m.bet);
     }
 
     dispose(): void {
@@ -22,20 +20,10 @@ export class PlayerBalanceController {
     }
 
     private resetBet(): void {
-        const m = this.model;
-        m.resetBetAmount();
-        this.view.setBalanceAndBet(m.balance, m.bet);
+        this.model.resetBetAmount();
     }
 
     private addToBet(delta: number): void {
-        const m = this.model;
-        if (delta <= 0) {
-            return;
-        }
-        if (m.balance <= 0) {
-            return;
-        }
-        m.addToBet(delta, true);
-        this.view.setBalanceAndBet(m.balance, m.bet);
+        this.model.addToBet(delta, true);
     }
 }

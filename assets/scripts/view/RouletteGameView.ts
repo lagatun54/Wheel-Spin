@@ -1,8 +1,8 @@
 import { _decorator, Button, Component, easing, Label, Node, tween, Tween, UIOpacity } from 'cc';
-import { normalizeAngleDeg360, slotNumberToColor } from '../RedBlackRandom';
+import { normalizeAngleDeg360 } from '../RedBlackRandom';
 import { getRouletteGameOrNull } from '../di/rouletteGameBindings';
 import type { RouletteGameController } from '../controller/RouletteGameController';
-import type { SpinFinalizeOutcome } from '../model/RouletteGameModel';
+import { canSpin, type SpinFinalizeOutcome } from '../model/RouletteGameModel';
 
 const { ccclass, property } = _decorator;
 
@@ -51,9 +51,8 @@ export class RouletteGameView extends Component {
     lastResultBlinkOpacity = 70;
 
     private _tween: Tween<Node> | null = null;
-    private _busy = false;
     private _game: RouletteGameController | null = null;
-    private _resolveSpinTween: (() => void) | null = null;
+    private _resolveSpinTween: ((completed: boolean) => void) | null = null;
 
     onLoad() {
         if (this.spinButton) {
@@ -61,7 +60,40 @@ export class RouletteGameView extends Component {
         }
     }
 
+    private _unsubscribeState: (() => void) | null = null;
+
+    private _started = false;
+
+    start() {
+        this._started = true;
+        if (this.enabledInHierarchy) this.subscribeToModel();
+    }
+
+    onEnable(): void {
+        if (this._started) this.subscribeToModel();
+    }
+
+    onDisable(): void {
+        this.unsubscribeFromModel();
+        this.finishSpinTween();
+        this.stopLastResultBlink();
+    }
+
+    private subscribeToModel(): void {
+        if (this._unsubscribeState) return;
+        const game = this.game();
+        this._unsubscribeState = game?.model.subscribe((state) => {
+            if (this.isValid) this.setSpinButtonInteractable(canSpin(state));
+        }) ?? null;
+    }
+
+    private unsubscribeFromModel(): void {
+        this._unsubscribeState?.();
+        this._unsubscribeState = null;
+    }
+
     onDestroy() {
+        this.unsubscribeFromModel();
         if (this.spinButton) {
             this.spinButton.node.off(Button.EventType.CLICK, this.onClickSpin, this);
         }
@@ -74,7 +106,7 @@ export class RouletteGameView extends Component {
         this._tween = null;
         const resolve = this._resolveSpinTween;
         this._resolveSpinTween = null;
-        resolve?.();
+        resolve?.(false);
     }
 
     private stopLastResultBlink(): void {
@@ -95,15 +127,13 @@ export class RouletteGameView extends Component {
             }
             case 'lose':
                 return `Loss: ${Math.floor(outcome.stake)}`;
-            case 'refund_no_color':
-                return `Refund: ${Math.floor(outcome.refund)}`;
             case 'idle':
             default:
                 return '';
         }
     }
 
-    private setLastResultLabel(outcome: SpinFinalizeOutcome): void {
+    showLastResult(outcome: SpinFinalizeOutcome): void {
         const label = this.lastResultLabel;
         if (!label?.isValid) {
             return;
@@ -111,7 +141,7 @@ export class RouletteGameView extends Component {
         label.string = this.formatLastResultFromOutcome(outcome);
     }
 
-    private playLastResultBlink(): void {
+    playLastResultBlink(): void {
         const label = this.lastResultLabel;
         if (!label?.isValid) {
             return;
@@ -160,72 +190,41 @@ export class RouletteGameView extends Component {
     }
 
     onClickSpin(): void {
-        void this.playSpinRoundAsync();
-    }
-
-    private async playSpinRoundAsync(): Promise<void> {
-        if (this._busy) {
-            return;
-        }
         const ctrl = this.game();
-        if (!ctrl || !ctrl.beginSpinRound()) {
-            return;
-        }
-        const target = this.resolveSpinTarget();
-        this._busy = true;
-        this.setSpinButtonInteractable(false);
-        const from = target.angle;
-
-        const slot = ctrl.pickRandomSlot1to8();
-        const color = slotNumberToColor(slot);
-        const targetAngle = ctrl.wheelAngleForSlot(
-            slot,
-            this.initialWheelAngleDeg,
-            this.slotAngleOffsetDeg,
-        );
-        const normalizedTargetAngle = from + normalizeAngleDeg360(targetAngle - from);
-        const minTurns = Math.max(1, Math.floor(this.fullTurns));
-        const to = normalizedTargetAngle + minTurns * 360;
-
-        try {
-            await this.tweenSpinToAsync(target, to);
-            if (!this.isValid || !target.isValid) {
-                ctrl.abortSpinRound();
-                return;
-            }
-            const outcome = ctrl.finalizeSpin(color);
-            this.setLastResultLabel(outcome);
-            const blinkAfterPopUp = outcome.kind === 'win' || outcome.kind === 'lose';
-            await ctrl.waitForSpinUiUnlockedAsync();
-            if (!this.isValid) {
-                return;
-            }
-            if (blinkAfterPopUp) {
-                this.playLastResultBlink();
-            }
-        } finally {
-            this._busy = false;
-            this.setSpinButtonInteractable(true);
+        if (ctrl) {
+            void ctrl.playRoundAsync(this).catch((error) => {
+                console.error('[RouletteGameView] Round failed.', error);
+            });
         }
     }
 
-    private setSpinButtonInteractable(interactable: boolean): void {
+    async playWheelAsync(slot: number): Promise<boolean> {
+        const target = this.resolveSpinTarget();
+        const from = target.angle;
+        const step = 360 / 8;
+        const targetAngle = (slot - 1) * step + this.initialWheelAngleDeg - this.slotAngleOffsetDeg;
+        const normalizedTargetAngle = from + normalizeAngleDeg360(targetAngle - from);
+        const turns = Math.max(1, Math.floor(this.fullTurns));
+        return this.tweenSpinToAsync(target, normalizedTargetAngle + turns * 360);
+    }
+
+    setSpinButtonInteractable(interactable: boolean): void {
         if (this.spinButton?.isValid) {
             this.spinButton.interactable = interactable;
         }
     }
 
-    private tweenSpinToAsync(target: Node, to: number): Promise<void> {
+    private tweenSpinToAsync(target: Node, to: number): Promise<boolean> {
         return new Promise((resolve) => {
             if (!target.isValid) {
-                resolve();
+                resolve(false);
                 return;
             }
 
             const finish = () => {
                 this._tween = null;
                 this._resolveSpinTween = null;
-                resolve();
+                resolve(true);
             };
 
             this.finishSpinTween();

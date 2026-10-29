@@ -1,4 +1,7 @@
 import { _decorator, Component } from 'cc';
+import { getPopUpLoseControllerOrNull, getPopUpWinControllerOrNull } from './di/popupBindings';
+import { showRoundResult } from './controller/RoundResultController';
+import { requestSpin } from './network/FakeRouletteApi';
 import { PlayerBalanceController } from './controller/PlayerBalanceController';
 import { RouletteBetController } from './controller/RouletteBetController';
 import { RouletteGameController, type RouletteGameControllerOptions } from './controller/RouletteGameController';
@@ -34,14 +37,18 @@ export class RouletteGame extends Component {
 
         const opts: RouletteGameControllerOptions = {
             balanceView: v,
-            betView: this.betView,
             startingBalance: this.startingBalance,
+            requestSpin,
+            showResult: (outcome) => showRoundResult(outcome, getPopUpWinControllerOrNull, getPopUpLoseControllerOrNull),
         };
 
         this._controller = new RouletteGameController(opts);
     }
 
     onDestroy() {
+        this.balanceView?.unbindModel();
+        this.betView?.unbindModel();
+        this._controller?.dispose();
         this._balanceController?.dispose();
         this._betController?.dispose();
         this._balanceController = null;
@@ -53,18 +60,17 @@ export class RouletteGame extends Component {
         const game = this._controller;
         const balance = this.balanceView;
         if (game && balance?.isValid) {
+            balance.bindModel(game.model);
             this._balanceController = new PlayerBalanceController(balance, game.model);
             this._balanceController.start();
         }
 
         const betView = this.betView;
         if (game && balance?.isValid && betView?.isValid) {
+            betView.bindModel(game.model);
             this._betController = new RouletteBetController(betView, game.model);
             this._betController.start();
         }
-
-        game?.start();
-        this.scheduleOnce(() => this._controller?.refreshBalanceView(), 0);
     }
 
     get game(): RouletteGameController | null {

@@ -1,5 +1,6 @@
 import { _decorator, Component, easing, Label, tween, Tween } from 'cc';
 import { Button } from '../UI/Button';
+import { canEditBet, type RouletteGameModel } from '../model/RouletteGameModel';
 
 const { ccclass, property } = _decorator;
 
@@ -30,7 +31,50 @@ export class PlayerBalanceView extends Component {
     winCountUpDuration = 0.85;
 
     private _balanceTween: Tween<{ v: number }> | null = null;
+    private _resolveBalanceTween: (() => void) | null = null;
     private _betHandlers: PlayerBalanceBetHandlers | null = null;
+
+    private _model: RouletteGameModel | null = null;
+    private _unsubscribeModel: (() => void) | null = null;
+
+    bindModel(model: RouletteGameModel): void {
+        this.unbindModel();
+        this._model = model;
+        if (this.enabledInHierarchy) this.subscribeToModel();
+    }
+
+    onEnable(): void {
+        this.subscribeToModel();
+    }
+
+    onDisable(): void {
+        this.unsubscribeFromModel();
+        this.stopBalanceAnimation();
+    }
+
+    private subscribeToModel(): void {
+        if (!this._model || this._unsubscribeModel) return;
+        let initial = true;
+        this._unsubscribeModel = this._model.subscribe((state) => {
+            if (!this.isValid) return;
+            this.setButtonsInteractable(canEditBet(state));
+            // The win tween owns the displayed number until presentation finishes.
+            if ((initial && !this._balanceTween) || state.round.phase !== 'presenting' || state.round.result.kind !== 'win') {
+                this.setBalanceAndBet(state.balance, state.bet);
+            }
+            initial = false;
+        });
+    }
+
+    unbindModel(): void {
+        this.unsubscribeFromModel();
+        this._model = null;
+    }
+
+    private unsubscribeFromModel(): void {
+        this._unsubscribeModel?.();
+        this._unsubscribeModel = null;
+    }
 
     public onClickBetAdd10(): void {
         this._betHandlers?.onAdd10();
@@ -78,8 +122,9 @@ export class PlayerBalanceView extends Component {
     }
 
     onDestroy() {
+        this.unbindModel();
         this.unbindBetHandlers();
-        this._balanceTween?.stop();
+        this.stopBalanceAnimation();
     }
 
     setBalanceAndBet(balance: number, bet: number): void {
@@ -91,30 +136,43 @@ export class PlayerBalanceView extends Component {
         }
     }
 
-    animateBalance(from: number, to: number, onComplete?: () => void): void {
+    private stopBalanceAnimation(): void {
         this._balanceTween?.stop();
-        if (!this.balanceLabel) {
-            onComplete?.();
-            return;
-        }
+        this._balanceTween = null;
+        const resolve = this._resolveBalanceTween;
+        this._resolveBalanceTween = null;
+        resolve?.();
+    }
 
-        const state = { v: from };
-        this._balanceTween = tween(state)
-            .to(
-                this.winCountUpDuration,
-                { v: to },
-                {
+    animateBalanceAsync(from: number, to: number): Promise<void> {
+        this.stopBalanceAnimation();
+        return new Promise((resolve) => {
+            const label = this.balanceLabel;
+            if (!this.isValid || !this.enabledInHierarchy || !label?.isValid) {
+                resolve();
+                return;
+            }
+            const state = { v: from };
+            label.string = `${Math.floor(from)}`;
+            this._resolveBalanceTween = resolve;
+            this._balanceTween = tween(state)
+                .to(this.winCountUpDuration, { v: to }, {
                     easing: easing.quadOut,
                     onUpdate: () => {
-                        this.balanceLabel!.string = `${Math.floor(state.v)}`;
+                        if (label.isValid) {
+                            label.string = `${Math.floor(state.v)}`;
+                        }
                     },
-                },
-            )
-            .call(() => {
-                this.balanceLabel!.string = `${Math.floor(to)}`;
-                this._balanceTween = null;
-                onComplete?.();
-            })
-            .start() as Tween<{ v: number }>;
+                })
+                .call(() => {
+                    if (label.isValid) {
+                        label.string = `${Math.floor(to)}`;
+                    }
+                    this._balanceTween = null;
+                    this._resolveBalanceTween = null;
+                    resolve();
+                })
+                .start();
+        });
     }
 }

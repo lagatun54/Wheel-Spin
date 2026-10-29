@@ -1,6 +1,7 @@
 import { _decorator, Component, UIOpacity } from 'cc';
 import type { RouletteColor } from '../RedBlackRandom';
 import { Button } from '../UI/Button';
+import { canEditBet, type RouletteGameModel } from '../model/RouletteGameModel';
 
 const { ccclass, property } = _decorator;
 
@@ -30,6 +31,42 @@ export class RouletteBetView extends Component {
     selectedOpacity = 255;
 
     private _handlers: RouletteBetHandlers | null = null;
+
+    private _model: RouletteGameModel | null = null;
+    private _unsubscribeModel: (() => void) | null = null;
+
+    bindModel(model: RouletteGameModel): void {
+        this.unbindModel();
+        this._model = model;
+        if (this.enabledInHierarchy) this.subscribeToModel();
+    }
+
+    onEnable(): void {
+        this.subscribeToModel();
+    }
+
+    onDisable(): void {
+        this.unsubscribeFromModel();
+    }
+
+    private subscribeToModel(): void {
+        if (!this._model || this._unsubscribeModel) return;
+        this._unsubscribeModel = this._model.subscribe((state) => {
+            if (!this.isValid) return;
+            this.applyBetColorHighlight(state.betColor);
+            this.setButtonsInteractable(canEditBet(state));
+        });
+    }
+
+    unbindModel(): void {
+        this.unsubscribeFromModel();
+        this._model = null;
+    }
+
+    private unsubscribeFromModel(): void {
+        this._unsubscribeModel?.();
+        this._unsubscribeModel = null;
+    }
 
     public onClickBetRed(): void {
         this._handlers?.onRed();
@@ -81,6 +118,7 @@ export class RouletteBetView extends Component {
     }
 
     onDestroy() {
+        this.unbindModel();
         this.unbindBetHandlers();
     }
 }

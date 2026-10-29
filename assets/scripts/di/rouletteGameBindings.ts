@@ -40,7 +40,7 @@ export class RouletteGameBindingsComponent extends Component {
         bindRouletteGame(this.resolveRouletteGame());
     }
 
-    start() {
+    onLoad() {
         this.applyBindings();
     }
 

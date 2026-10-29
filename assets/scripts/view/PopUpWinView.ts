@@ -15,23 +15,10 @@ export class PopUpWinView extends PopUpView {
     @property({ type: AudioClip, tooltip: 'Звук при открытии окна победы (не задан — без звука)' })
     openSound: AudioClip | null = null;
 
-    private _controller: PopUpWinController | null = null;
-
     private readonly _winCountHolder = { value: 0 };
-
-    private readonly _autoClose = () => {
-        this.hide();
-    };
-
-    private _spinUnlockOnDismiss?: () => void;
-
-    setController(controller: PopUpWinController | null): void {
-        this._controller = controller;
-    }
 
     onDestroy() {
         this.stopWinCountAnimation();
-        this.unschedule(this._autoClose);
         super.onDestroy();
     }
 
@@ -95,46 +82,7 @@ export class PopUpWinView extends PopUpView {
         this.stopWinCountAnimation();
     }
 
-    hide(): void {
-        this.unschedule(this._autoClose);
-        if (this._controller) {
-            this._controller.hideWithAnimation();
-        } else {
-            this.playScaleHideAnimation(this.hideAnimDuration, () => {
-                this.hideImmediate();
-                const cb = this._spinUnlockOnDismiss;
-                this._spinUnlockOnDismiss = undefined;
-                cb?.();
-            });
-        }
-    }
-
-    hideImmediate(): void {
-        this.unschedule(this._autoClose);
-        super.hideImmediate();
-    }
-
     showWin(payout: number, onPopUpDismissed?: () => void): void {
-        if (this._controller) {
-            this._controller.showWin(payout, onPopUpDismissed);
-        } else {
-            this.renderWin(payout, onPopUpDismissed);
-        }
-    }
-
-    renderWin(payout: number, onPopUpDismissed?: () => void): void {
-        this._spinUnlockOnDismiss = onPopUpDismissed;
-        this.applyWinAmountAnimated(payout);
-        this.playScaleShowAnimation(this.showAnimDuration, () => {
-            this.scheduleAutoClose();
-        });
-    }
-
-    scheduleAutoClose(): void {
-        this.unschedule(this._autoClose);
-        if (this.autoCloseSeconds <= 0) {
-            return;
-        }
-        this.scheduleOnce(this._autoClose, this.autoCloseSeconds);
+        (this._controller as PopUpWinController | null)?.showWin(payout, onPopUpDismissed);
     }
 }
